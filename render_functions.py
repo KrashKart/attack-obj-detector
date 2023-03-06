@@ -455,6 +455,3 @@ def join(*args):
         print("No meshes selected")
     scene = join_scene(list(args))
     return scene
-
-# def image_paste(image, onto, mask):
-    
