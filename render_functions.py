@@ -30,6 +30,7 @@ from pytorch3d.structures.meshes import join_meshes_as_scene as join_scene
 from pytorch3d.renderer.camera_utils import join_cameras_as_batch as join_cameras
 import torchshow as ts
 
+import ml
 
 
 class Camera:
@@ -82,7 +83,36 @@ class Render:
     def get_params(self):
         return float(self.dist), float(self.elev), float(self.azim)
 
+    
+def preprocess(image, purpose):
+    """Carries out processing for image to make it compatible with functions
+    
+    Args:
+        image (Tensor): Tensor rendered by renderer [1, RGB(A), W, H] or [1, W, H, RGB(A)]
+        purpose (str): whether to process for "pred" [1, RGB, W, H], "view" [W, H, RGB] or "pil" [RGB, W, H]
+    
+    Returns:
+        processed (Tensor): processed tensor
+    """
+    if isinstance(image, Render):
+        image = image.get_image()
+    if len(image.shape) == 3:
+        image = torch.unsqueeze(image, 0)
+    if image.shape[3] == 3 or image.shape[3] == 4: # [1, W, H, RGB(A)] -> [1, RGB(A), W, H]
+        image = image.permute(0, 3, 1, 2)
+    if image.shape[1] == 4: # [1, RGB(A), W, H] -> [1, RGB, W, H]
+        image = image[:, :3, :, :]
+    
+    if purpose == "pred": # if pred, required shape is [1, RGB, W, H]
+        return image
+    elif purpose == "view": # if view, required shape is [W, H, RGB]
+        return image.squeeze().permute(1, 2, 0)
+    elif purpose == "pil":
+        return image.squeeze()
+    else:
+        print("purpose must be 'pred', 'view' or 'pil'")
 
+        
 def set_device():
     """Sets the device to either "cuda:0" if available or "cpu" otherwise
     Args:
@@ -171,7 +201,7 @@ def create_render(device,
         renderer: renderer
     """
     
-    R, T = look_at_view_transform(dist=distance, elev=elev, azim=azim)
+    R, T = look_at_view_transform(dist=distance, elev=elev, azim=360-azim)
     cameras = FoVPerspectiveCameras(device=device, R=R, T=T)
     
     lights = PointLights(ambient_color=(ambient,), diffuse_color=(diffuse,), specular_color=(specular,), 
@@ -219,8 +249,8 @@ def create_cameras(device, elev_batch=10, azim_batch=10, distance=2.0, elevMin=0
     
     for e in elev:
         for a in azim:
-            R, T = look_at_view_transform(dist=distance, elev=e, azim=a)
-            camera = Camera(FoVPerspectiveCameras(device=device, R=R, T=T), distance, e, 360 - a)
+            R, T = look_at_view_transform(dist=distance, elev=e, azim=360-a)
+            camera = Camera(FoVPerspectiveCameras(device=device, R=R, T=T), distance, e, a)
             cameras.append(camera)
             
     elevInt = 0 if elev_batch == 1 else (elevMax - elevMin)/(elev_batch - 1)
@@ -253,6 +283,29 @@ def tt_split(cameras, train_prop):
     print(test_idx)
     train_cams = join_cameras([cameras[int(idx)].get_camera() for idx in training_idx])
     test_cams = join_cameras([cameras[int(idx)].get_camera() for idx in test_idx])
+    return train_cams, test_cams, training_idx, test_idx
+
+
+def tt_split_paste(cameras, train_prop):
+    """Splits cameras according to train proportion
+    
+    Args:
+        cameras (list): list of cameras
+        train_prop (float): proportion of cameras to dedicate to training
+        
+    Returns:
+        train_cams, test_cams (Camera list): FoVPerspective cameras for testing
+        training_idx, test_idx (int list): index of train and test cameras w.r.t. original cameras list
+    """
+    
+    total_views = len(cameras)
+    train_size = round(train_prop * total_views)
+    training_idx = np.random.choice(total_views, train_size, replace=False)
+    test_idx = [idx for idx in range(total_views) if idx not in training_idx]
+
+    print(test_idx)
+    train_cams = [cameras[int(idx)] for idx in training_idx]
+    test_cams = [cameras[int(idx)] for idx in test_idx]
     return train_cams, test_cams, training_idx, test_idx
 
 
@@ -352,6 +405,30 @@ def render_batch(scene, renderer, cameras):
     images = renderer(temp_mesh, cameras=cameras)
     images = torch.clamp(images, min=0.0, max=1.0)
     return images
+
+
+def render_batch_paste(scene, renderer, cameras):
+    """Batch rendering
+    
+    Args:
+        renderer (renderer) : renderer
+        scene (Meshes): Meshes object (unextended)
+        cameras (cameras): cameras (not list of cameras)
+    
+    Returns:
+        images (Tensor): tensor of shape [batch_size, RGBA, W, H]
+    """
+    
+    output = []
+    for camera in cameras:
+        d, e, a = camera.get_params()
+        onto = ml.search(d, e, a, torch.device("cuda:0"))
+        img = camera.render(scene, renderer).get_image()
+        img = preprocess(img, "pil")
+        onto = preprocess(onto, "pil")
+        result = img_mask(img, onto, torch.device("cuda:0"))
+        output += result
+    return output
 
                            
 def render_n(mesh, renderer, device, batch_size, distance=2.0, elevMin=0, elevMax=180, azimMin=0, azimMax=360):
@@ -471,35 +548,6 @@ def see_uv(mesh, save=False, **kwargs):
     if save:
         ts.save(texture_uv, **kwargs)
 
-
-def preprocess(image, purpose):
-    """Carries out processing for image to make it compatible with functions
-    
-    Args:
-        image (Tensor): Tensor rendered by renderer [1, RGB(A), W, H] or [1, W, H, RGB(A)]
-        purpose (str): whether to process for "pred" [1, RGB, W, H], "view" [W, H, RGB] or "pil" [RGB, W, H]
-    
-    Returns:
-        processed (Tensor): processed tensor
-    """
-    if isinstance(image, Render):
-        image = image.get_image()
-    if len(image.shape) == 3:
-        image = torch.unsqueeze(image, 0)
-    if image.shape[3] == 3 or image.shape[3] == 4: # [1, W, H, RGB(A)] -> [1, RGB(A), W, H]
-        image = image.permute(0, 3, 1, 2)
-    if image.shape[1] == 4: # [1, RGB(A), W, H] -> [1, RGB, W, H]
-        image = image[:, :3, :, :]
-    
-    if purpose == "pred": # if pred, required shape is [1, RGB, W, H]
-        return image
-    elif purpose == "view": # if view, required shape is [W, H, RGB]
-        return image.squeeze().permute(1, 2, 0)
-    elif purpose == "pil":
-        return image.squeeze()
-    else:
-        print("purpose must be 'pred', 'view' or 'pil'")
-
         
 def join(*args):
     """Joins a list of meshes to form a scene
@@ -526,8 +574,8 @@ def img_mask(img, onto, device):
         
     Returns:
         result (Tensor): resultant image
-
     """
+    
     if isinstance(img, Render):
         img = img.get_image()
     if type(onto) != torch.Tensor:
@@ -537,7 +585,7 @@ def img_mask(img, onto, device):
         print("img must be of type Tensor")
         return
     elif torch.max(onto) > 1:
-        onto  = float(onto) / 255
+        onto  = onto / 255
     
     img = preprocess(img, "pil")
     onto = preprocess(onto, "pil")
@@ -545,5 +593,6 @@ def img_mask(img, onto, device):
     white = torch.ones(3, device=device)
     mask = torch.all(img == 1, dim=0)
     result = torch.where(mask, onto, img)
+    result = torch.unsqueeze(result, 0)
     
     return result

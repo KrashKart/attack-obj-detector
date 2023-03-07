@@ -84,13 +84,24 @@ def load_model(name, device):
 
 
 def search(dist, elev, azim, device, path="./data/", start="m1_v26_p0", end="rgb.png"):
+    """FOR PASTE ONLY. Finds the picture file with the correct dist, elev and azim
+    
+    Args:
+        dist, elev, azim (float): params
+        device: device
+        path, start, end (str): folder to check + formatting
+    
+    Returns:
+        onto (Tensor): picture for pasting
+    """
+    
     dist, elev, azim = int(dist), int(elev), int(azim)
     respective = path + start + f"_Dis_{dist}_Azi_{azim}_Ele_{elev}_" + end
     onto = Image.open(respective)
     onto = onto.resize((640, 640))
     tran = transforms.PILToTensor()
-    onto = torch.unsqueeze(tran(onto), 0)/255
-    onto = preprocess(onto, "pred").to(device)
+    onto = tran(onto).to(device)
+
     return onto
 
 def predict(model, image, show=False):
@@ -137,6 +148,42 @@ def batch_predict(model, images, adverse=False, adverse_classes=None):
     images = preprocess(images, "pred")
     with torch.no_grad():
         for img_idx in range(len(images)):
+            pred = predict(model, images[img_idx])
+            if len(pred.xyxy[0]) == 0:
+                predicts["No Detection"] = predicts.get("No Detection", 0) + 1
+            else:
+                pred_class_idx = int(pred.xyxy[0][0][5])
+                pred_class = classes[pred_class_idx]
+                predicts[pred_class] = predicts.get(pred_class, 0) + 1
+                if adverse and adverse_classes == pred_class_idx:
+                    adverses[img_idx] = pred_class
+    print("predicts: ", predicts)
+    if adverse:
+        print("adverse: ", adverses)
+    return predicts, adverses if adverse and adverse_classes else predicts
+
+
+def batch_predict_paste(model, images, adverse=False, adverse_classes=None):
+    """Conducts batch prediction on batch tensor
+    
+    Args:
+        model: model
+        images (Tensor): [batch_size, W, H, RGBA] shape tensor input
+        adverse (bool): whether to mark adverse imag
+        adverse_classes (int): class indices to mark as adverse
+    
+    Returns:
+        predicts (dict): either a dictionary of predicted classes (YOLOv5l with Autoshape) 
+                    or a [batch_size, N, 85] Tensor (DetectMultiBackend)
+        adverse (dict): list of indices where the predictions are of adverse_class (if adverse is True)
+    """
+    
+    predicts = {}
+    adverses = {}
+    with open("./coco_classes.txt", "r") as f:
+        classes = [s.strip() for s in f.readlines()]
+    with torch.no_grad():
+        for img_idx in range(len(images)):
             img = torch.unsqueeze(images[img_idx], 0)
             pred = predict(model, img)
             if len(pred.xyxy[0]) == 0:
@@ -172,16 +219,51 @@ def show_adverse(scene, renderer, adverses, test_idxs, cameras, **kwargs):
     else:
         adverse_test_cams_idx = [test_idxs[idx] for idx in adverses.keys()] # using adverse index to find the camera index of adverse cameras in test_idx
         adverse_cameras = [cameras[idx] for idx in adverse_test_cams_idx] # finding the camera with d, e, a in the master camera list
-        adverse_views = [(d, e.item(), a.item()) for c, d, e, a in adverse_cameras] # extracting d, e, a for adverse cams
-        adverse_cams = [camera[0] for camera in adverse_cameras] # compiling adverse FOVCAMs into list
-
+        adverse_views = [camera.get_params() for camera in adverse_cameras] # extracting d, e, a for adverse cams
+        adverse_cams = [camera.get_camera() for camera in adverse_cameras] # compiling adverse FOVCAMs into list
+        
         adverse_cams_join = join_cameras(adverse_cams)
         adverse_imgs = render_batch(scene, renderer, adverse_cams_join)
         adverse_imgs = torch.clamp(adverse_imgs, min=0.0, max=1.0)
         ts.show(adverse_imgs, axes_title="{img_id_from_1}", **kwargs)
         ts.save(adverse_imgs, axes_title="{img_id_from_1}", **kwargs)
         for i, (k, v) in enumerate(adverses.items()):
-            print(f"Image ID {i + 1}: Test cam {k} {adverse_views[i]} --> {v}")
+            print(f"Image {i+1}: {v}")
+        return adverse_views
+    
+
+def show_adverse_onto(scene, renderer, adverses, test_idxs, cameras, **kwargs):
+    """FOR PASTE ONLY. Renders and shows the adverse viewpoints and dist, elev, azim
+    
+    Args:
+        mesh (Meshes): mesh
+        renderer: renderer
+        adverses (dict): dict of cam_idx: pred_class
+        test_idxs (int list): list of indices of test camera views w.r.t. master camera list
+        cameras (Cam list): list of (camera, d, e, a)s (master camera list)
+    
+    Returns:
+        adverse_views (tup list): list of tuples containing (
+    """
+    
+    if not adverses:
+        print("No adverse views")
+    else:
+        adverse_test_cams_idx = [test_idxs[idx] for idx in adverses.keys()] # using adverse index to find the camera index of adverse cameras in test_idx
+        adverse_cameras = [cameras[idx] for idx in adverse_test_cams_idx] # finding the camera with d, e, a in the master camera list
+        adverse_views = [camera.get_params() for camera in adverse_cameras] # extracting d, e, a for adverse cams
+        adverse_cams = [camera.get_camera() for camera in adverse_cameras] # compiling adverse FOVCAMs into list
+        print(adverse_views)
+        
+        adverse_cams_join = join_cameras(adverse_cams)
+        adverse_imgs = render_batch(scene, renderer, adverse_cams_join)
+        adverse_imgs = torch.clamp(adverse_imgs, min=0.0, max=1.0)
+        for i, (k, v) in enumerate(adverses.items()):
+            d, e, a = adverse_views[i]
+            p = v
+            onto = ml.search(d, e, a, device)
+            image_per = img_mask(adverse_imgs[i], onto, device)
+            ts.show(image_per, suptitle=f"Dist {d}, Elev {e}, Azim {a}, Prediction: {p}", **kwargs)
         return adverse_views
 
 
