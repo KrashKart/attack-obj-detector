@@ -22,6 +22,7 @@ from pytorch3d.renderer import (
     MeshRenderer,
     MeshRasterizer,
     SoftPhongShader,
+    SoftSilhouetteShader,
     BlendParams,)
 
 import torchvision.transforms.functional as TF
@@ -100,7 +101,7 @@ def create_render(device,
                   ambient=[1.0, 1.0, 1.0],
                   diffuse=[1.0, 1.0, 1.0],
                   specular=[1.0, 1.0, 1.0],
-                  light_loc=[2.0, 2.0, 2.0], 
+                  light_loc=[2.0, 2.0, 2.0],
                  ):
 
     """Creates a renderer with one camera
@@ -127,12 +128,13 @@ def create_render(device,
     
     # set rasterization settings
     raster_settings = RasterizationSettings(
-        image_size=640,
-        blur_radius=0.0, 
-        faces_per_pixel=1,
-        max_faces_per_bin=faces,  # toggle max_faces_per_bin if model has too many faces
-        bin_size=bin_size,
-    )
+            image_size=640,
+            blur_radius=0.0, 
+            faces_per_pixel=1,
+            max_faces_per_bin=faces,  # toggle max_faces_per_bin if model has too many faces
+            bin_size=bin_size,
+        )
+    shader = SoftPhongShader(device=device, cameras=cameras, lights=lights, blend_params=blend_params)
     
      # initialise renderer
     renderer = MeshRenderer(
@@ -140,15 +142,12 @@ def create_render(device,
             cameras=cameras, 
             raster_settings=raster_settings
         ),
-        shader=SoftPhongShader(
-            device=device, 
-            cameras=cameras,
-            lights=lights,
-            blend_params=blend_params,
-        )
+        shader=shader
     )
     
     return renderer
+
+
 
 
 def create_cameras(device, elev_batch=10, azim_batch=10, distance=2.0, elevMin=0, elevMax=30, azimMin=0, azimMax=30):
@@ -275,7 +274,7 @@ def render_one(mesh, renderer, device, distance=3.0, elev=45, azim=45):
         distance, elev, azim (int): parameters of the camera to render on (elev and azim in degs)
         
     Returns:
-        images (Tensor): Tensor of the rendered image of shape [1, RGB, W, H]
+        images (Tensor): Tensor of the rendered image of shape [1, RGBA, W, H]
     """
 
     # Initialise cameras 
@@ -283,7 +282,6 @@ def render_one(mesh, renderer, device, distance=3.0, elev=45, azim=45):
     cameras = FoVPerspectiveCameras(device=device, R=R, T=T)
 
     images = renderer(mesh, cameras=cameras) # [1, W, H, RGBA]
-    images = preprocess(images, "pred")
     images = torch.clamp(images, min=0.0, max=1.0)
     
     return images
@@ -297,12 +295,11 @@ def render_batch(scene, renderer, cameras):
         cameras (cameras): cameras (not list of cameras)
     
     Returns:
-        images (Tensor): tensor of shape [batch_size, W, H, RGBA]
+        images (Tensor): tensor of shape [batch_size, RGBA, W, H]
     """
     
     temp_mesh = scene.extend(len(cameras))
     images = renderer(temp_mesh, cameras=cameras)
-    images = preprocess(images, "pred")
     images = torch.clamp(images, min=0.0, max=1.0)
     return images
 
@@ -317,7 +314,7 @@ def render_n(mesh, renderer, device, batch_size, distance=2.0, elevMin=0, elevMa
         distance (float), elevMin, elevMax, azimMin, azimMax (int): camera parameters to render on (elev, azim in degs)
         
     Returns:
-        images (Tensor): tensor of shape [batch_size, W, H, 4]
+        images (Tensor): tensor of shape [batch_size, W, H, RGBA]
     """
 
     # initialise BATCH_SIZE number of meshes
@@ -374,7 +371,7 @@ def save(image, path="./results", **kwargs):
     Returns:
         None
     """
-    
+    image = preprocess(image, "pil")
     ts.save(image, path, **kwargs)
 
 
@@ -389,6 +386,7 @@ def see(image, **kwargs):
         None
     """   
     
+    image = preprocess(image, "pil")
     ts.show(image, **kwargs)
     
 
@@ -455,3 +453,34 @@ def join(*args):
         print("No meshes selected")
     scene = join_scene(list(args))
     return scene
+
+def img_mask(img, onto, device):
+    """Takes the img and pastes the car portion onto an image
+    
+    Args:
+        img (Tensor): image tensor of the rendered car [W, H, 3] or [3, W, H]
+        onto (Tensor): image tensor to paste onto [W, H, 3] or [3, W, H]
+        device: device [1, i want starbucks]
+        
+    Returns:
+        result (Tensor): resultant image
+
+    """
+    
+    if type(onto) != torch.Tensor:
+        print("onto must be of type Tensor")
+        return
+    elif torch.max(onto) > 1 or torch.max(img) > 1:
+        print("All image tensor values must be scaled to [0, 1]")
+        return
+    
+    img = preprocess(img, "pil")
+    onto = preprocess(onto, "pil")
+    if torch.max(onto) > 1:
+        onto /= 255
+    
+    white = torch.ones(3, device=device)
+    mask = torch.all(img == 1, dim=0)
+    result = torch.where(mask, onto, img)
+    
+    return result
