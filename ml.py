@@ -11,6 +11,59 @@ from render_functions import *
 import numpy as np
 from pytorch3d.renderer.camera_utils import join_cameras_as_batch as join_cameras
 import torchshow as ts
+from PIL import Image
+
+
+class Camera:
+    def __init__(self, camera, dist, elev, azim):
+        self.camera = camera
+        self.dist = dist
+        self.elev = elev
+        self.azim = azim
+    
+    def get_camera(self):
+        return self.camera
+    
+    def get_dist(self):
+        return float(self.dist)
+    
+    def get_elev(self):
+        return float(self.elev)
+    
+    def get_azim(self):
+        return float(self.azim)
+    
+    def get_params(self):
+        return float(self.dist), float(self.elev), float(self.azim)
+    
+    def render(self, mesh, renderer):
+        images = renderer(mesh, cameras=self.get_camera()) # [1, W, H, RGBA]
+        images = Render(torch.clamp(images, min=0.0, max=1.0), self.get_dist(), self.get_elev(), self.get_azim())
+        return images
+
+    
+class Render:
+    def __init__(self, image, dist, elev, azim):
+        self.image = image
+        self.dist = dist
+        self.elev = elev
+        self.azim = azim
+    
+    def get_image(self):
+        return self.image
+    
+    def get_dist(self):
+        return float(self.dist)
+    
+    def get_elev(self):
+        return float(self.elev)
+    
+    def get_azim(self):
+        return float(self.azim)
+    
+    def get_params(self):
+        return float(self.dist), float(self.elev), float(self.azim)
+    
 
 def load_model(name, device):
     """Loads YOLOv5 from hub and sets to eval
@@ -29,6 +82,16 @@ def load_model(name, device):
     
     return model
 
+
+def search(dist, elev, azim, device, path="./data/", start="m1_v26_p0", end="rgb.png"):
+    dist, elev, azim = int(dist), int(elev), int(azim)
+    respective = path + start + f"_Dis_{dist}_Azi_{azim}_Ele_{elev}_" + end
+    onto = Image.open(respective)
+    onto = onto.resize((640, 640))
+    tran = transforms.PILToTensor()
+    onto = torch.unsqueeze(tran(onto), 0)/255
+    onto = preprocess(onto, "pred").to(device)
+    return onto
 
 def predict(model, image, show=False):
     """Passes image tensor through the model for prediction

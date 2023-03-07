@@ -31,6 +31,58 @@ from pytorch3d.renderer.camera_utils import join_cameras_as_batch as join_camera
 import torchshow as ts
 
 
+
+class Camera:
+    def __init__(self, camera, dist, elev, azim):
+        self.camera = camera
+        self.dist = dist
+        self.elev = elev
+        self.azim = azim
+    
+    def get_camera(self):
+        return self.camera
+    
+    def get_dist(self):
+        return float(self.dist)
+    
+    def get_elev(self):
+        return float(self.elev)
+    
+    def get_azim(self):
+        return float(self.azim)
+    
+    def get_params(self):
+        return float(self.dist), float(self.elev), float(self.azim)
+    
+    def render(self, mesh, renderer):
+        images = renderer(mesh, cameras=self.get_camera()) # [1, W, H, RGBA]
+        images = Render(torch.clamp(images, min=0.0, max=1.0), self.get_dist(), self.get_elev(), self.get_azim())
+        return images
+
+    
+class Render:
+    def __init__(self, image, dist, elev, azim):
+        self.image = image
+        self.dist = dist
+        self.elev = elev
+        self.azim = azim
+    
+    def get_image(self):
+        return self.image
+    
+    def get_dist(self):
+        return float(self.dist)
+    
+    def get_elev(self):
+        return float(self.elev)
+    
+    def get_azim(self):
+        return float(self.azim)
+    
+    def get_params(self):
+        return float(self.dist), float(self.elev), float(self.azim)
+
+
 def set_device():
     """Sets the device to either "cuda:0" if available or "cpu" otherwise
     Args:
@@ -168,8 +220,8 @@ def create_cameras(device, elev_batch=10, azim_batch=10, distance=2.0, elevMin=0
     for e in elev:
         for a in azim:
             R, T = look_at_view_transform(dist=distance, elev=e, azim=a)
-            camera = FoVPerspectiveCameras(device=device, R=R, T=T)
-            cameras.append((camera, distance, e, a))
+            camera = Camera(FoVPerspectiveCameras(device=device, R=R, T=T), distance, e, 360 - a)
+            cameras.append(camera)
             
     elevInt = 0 if elev_batch == 1 else (elevMax - elevMin)/(elev_batch - 1)
     azimInt = 0 if azim_batch == 1 else (azimMax - azimMin)/(azim_batch - 1)
@@ -199,8 +251,8 @@ def tt_split(cameras, train_prop):
     test_idx = [idx for idx in range(total_views) if idx not in training_idx]
 
     print(test_idx)
-    train_cams = join_cameras([cameras[int(idx)][0] for idx in training_idx])
-    test_cams = join_cameras([cameras[int(idx)][0] for idx in test_idx])
+    train_cams = join_cameras([cameras[int(idx)].get_camera() for idx in training_idx])
+    test_cams = join_cameras([cameras[int(idx)].get_camera() for idx in test_idx])
     return train_cams, test_cams, training_idx, test_idx
 
 
@@ -278,14 +330,12 @@ def render_one(mesh, renderer, device, distance=3.0, elev=45, azim=45):
     """
 
     # Initialise cameras 
-    R, T = look_at_view_transform(dist=distance, elev=elev, azim=azim)
-    cameras = FoVPerspectiveCameras(device=device, R=R, T=T)
-
-    images = renderer(mesh, cameras=cameras) # [1, W, H, RGBA]
-    images = torch.clamp(images, min=0.0, max=1.0)
+    R, T = look_at_view_transform(dist=distance, elev=elev, azim=360 - azim)
+    cameras = Camera(FoVPerspectiveCameras(device=device, R=R, T=T), distance, elev, azim)
     
-    return images
+    return cameras.render(mesh, renderer)
 
+                           
 def render_batch(scene, renderer, cameras):
     """Batch rendering
     
@@ -303,6 +353,7 @@ def render_batch(scene, renderer, cameras):
     images = torch.clamp(images, min=0.0, max=1.0)
     return images
 
+                           
 def render_n(mesh, renderer, device, batch_size, distance=2.0, elevMin=0, elevMax=180, azimMin=0, azimMax=360):
     """Used to render and visualise BATCH_SIZE number of views of the object
     
@@ -322,7 +373,7 @@ def render_n(mesh, renderer, device, batch_size, distance=2.0, elevMin=0, elevMa
 
     # 360 azimuth and 180 elevation camera angles split into BATCH_SIZE view
     elev = torch.linspace(elevMin, elevMax, batch_size)
-    azim = torch.linspace(azimMin, azimMax, batch_size)
+    azim = 360 - torch.linspace(azimMin, azimMax, batch_size)
 
     # Initialise cameras 
     R, T = look_at_view_transform(dist=distance, elev=elev, azim=azim)
@@ -371,8 +422,13 @@ def save(image, path="./results", **kwargs):
     Returns:
         None
     """
-    image = preprocess(image, "pil")
-    ts.save(image, path, **kwargs)
+    
+    if isinstance(image, Render):
+        saveimage = image.get_image()
+    else:
+        saveimage = image                  
+    saveimage = preprocess(saveimage, "pil")                   
+    ts.save(saveimage, path, **kwargs)
 
 
 def see(image, **kwargs):
@@ -386,8 +442,12 @@ def see(image, **kwargs):
         None
     """   
     
-    image = preprocess(image, "pil")
-    ts.show(image, **kwargs)
+    if isinstance(image, Render):
+        seeimage = image.get_image()
+    else:
+        seeimage = image                  
+    seeimage = preprocess(seeimage, "pil") 
+    ts.show(seeimage, **kwargs)
     
 
 def see_uv(mesh, save=False, **kwargs):
@@ -422,6 +482,8 @@ def preprocess(image, purpose):
     Returns:
         processed (Tensor): processed tensor
     """
+    if isinstance(image, Render):
+        image = image.get_image()
     if len(image.shape) == 3:
         image = torch.unsqueeze(image, 0)
     if image.shape[3] == 3 or image.shape[3] == 4: # [1, W, H, RGB(A)] -> [1, RGB(A), W, H]
@@ -436,7 +498,7 @@ def preprocess(image, purpose):
     elif purpose == "pil":
         return image.squeeze()
     else:
-        raise Exception("purpose must be 'pred', 'view' or 'pil'")
+        print("purpose must be 'pred', 'view' or 'pil'")
 
         
 def join(*args):
@@ -466,18 +528,19 @@ def img_mask(img, onto, device):
         result (Tensor): resultant image
 
     """
-    
+    if isinstance(img, Render):
+        img = img.get_image()
     if type(onto) != torch.Tensor:
         print("onto must be of type Tensor")
         return
-    elif torch.max(onto) > 1 or torch.max(img) > 1:
-        print("All image tensor values must be scaled to [0, 1]")
+    elif type(img) != torch.Tensor:
+        print("img must be of type Tensor")
         return
+    elif torch.max(onto) > 1:
+        onto  = float(onto) / 255
     
     img = preprocess(img, "pil")
     onto = preprocess(onto, "pil")
-    if torch.max(onto) > 1:
-        onto /= 255
     
     white = torch.ones(3, device=device)
     mask = torch.all(img == 1, dim=0)
