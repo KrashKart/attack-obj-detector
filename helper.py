@@ -329,6 +329,6 @@ def plot_classes(classes, path="./images/classes.jpg"):
     plt.title("Predicted Classes over time")
     plt.xlabel("# of iterations")
     plt.ylabel("Classes (0 - 79)")
-    plt.ylim(0, 80)
+    plt.ylim(-2, 80)
     plt.savefig(path)
     plt.show()

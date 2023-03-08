@@ -28,6 +28,9 @@ def load_model(name, device, conf, iou, max_det):
     """
     
     model = torch.hub.load('ultralytics/yolov5', name)
+    model.conf = conf
+    model.iou = iou
+    model.max_det = max_det
     model.eval()
     model.to(device)
     
@@ -122,4 +125,4 @@ def show_adverse(adverses, **kwargs):
             d, e, a = adverse.get_params()
             image = adverse.get_image()
             pred = adverse.get_pred()
-            ts.show(image[..., :3], suptitle=f"{pred}: Dist {d}, Elev {e}, Azim {a}", **kwargs)
+            ts.show(image[:3, ...], suptitle=f"{pred}: Dist {d}, Elev {e}, Azim {a}", **kwargs)
