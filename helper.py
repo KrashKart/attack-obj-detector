@@ -5,8 +5,12 @@ from torchvision import transforms
 import torchshow as ts
 import numpy as np
 import matplotlib.pyplot as plt
+from platform import python_version
+import pytorch3d
 
 class Camera:
+    """Camera class to store dist, elev and azim for easier handling
+    """
     def __init__(self, camera, dist, elev, azim):
         self.camera = camera
         self.dist = dist
@@ -35,6 +39,8 @@ class Camera:
 
     
 class Render:
+    """Render class to store camera params and prediction
+    """
     def __init__(self, image, dist, elev, azim, pred=None):
         self.image = image
         self.dist = dist
@@ -62,13 +68,51 @@ class Render:
 
 
 class blockOutput:
+    """Used to block logging of INFO level or lower
+    """
     def __enter__(self):
         logging.disable(logging.INFO)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         logging.disable(logging.NOTSET)
 
+        
+def specs():
+    """Prints crucial package version for debug and confirmation
     
+    Args:
+        None
+       
+    Returns:
+        None
+    """
+    
+    print(f"Python version: {python_version()}")
+    print(f"PyTorch3D version: {pytorch3d.__version__}")
+    print(f"CUDA version: {torch.version.cuda}")
+
+    
+def set_device():
+    """Sets the device to either "cuda:0" if available or "cpu" otherwise
+    Args:
+        None
+        
+    Returns:
+        device: device
+    """
+
+    # check if cuda is available, set device cuda if True and cpu if False
+    print(f"torch.cuda.is_available() is {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print("Cuda available")
+        device = torch.device("cuda:0")
+        torch.cuda.set_device(device)
+    else:
+        print("Cuda not available, using cpu")
+        device = torch.device("cpu")
+    return device
+
+
 def preprocess(image, purpose):
     """Carries out processing for image to make it compatible with functions
     
@@ -77,7 +121,7 @@ def preprocess(image, purpose):
         purpose (str): whether to process for "pred" [1, RGB, W, H], "view" [W, H, RGB] or "pil" [RGB, W, H]
     
     Returns:
-        processed (Tensor): processed tensor
+        image (Tensor): processed tensor
     """
     if isinstance(image, Render):
         image = image.get_image()
@@ -90,8 +134,6 @@ def preprocess(image, purpose):
     
     if purpose == "pred": # if pred, required shape is [1, RGB, W, H]
         return image
-    elif purpose == "view": # if view, required shape is [W, H, RGB]
-        return image.squeeze().permute(1, 2, 0)
     elif purpose == "pil":
         return image.squeeze()
     else:
@@ -99,7 +141,7 @@ def preprocess(image, purpose):
         
 
 def search(dist, elev, azim, device, path="./data/", start="m1_v26_p0", end="rgb.png"):
-    """FOR PASTE ONLY. Finds the picture file with the correct dist, elev and azim
+    """FOR PASTE ONLY. Finds the picture file with the correct dist, elev and azim and returns its Tensor representation
     
     Args:
         dist, elev, azim (float): params
@@ -107,7 +149,7 @@ def search(dist, elev, azim, device, path="./data/", start="m1_v26_p0", end="rgb
         path, start, end (str): folder to check + formatting
     
     Returns:
-        onto (Tensor): picture for pasting
+        onto (Tensor): picture for pasting [3, W, H]
     """
     
     dist, elev, azim = int(dist), int(elev), int(azim)
@@ -159,7 +201,7 @@ def save(image, path="./results", **kwargs):
     """Saves rendered image to a defined path
     
     Args:
-        image (Tensor): Tensor of shape [1, RGB, W, H]
+        image (Tensor) or (Tensor list): Tensor or batch of Tensors in a list
         path (str): String containing destination and image name
         **kwargs (bruh): other args for ts.save
         
@@ -187,7 +229,7 @@ def see(image, **kwargs):
     """Visualises the mesh
     
     Args:
-        image (Tensor): Tensor containing information about a mesh
+        image (Tensor) or (Tensor list): Tensor or batch of Tensors in a list
         **kwargs (lmaooooo): other args for ts.show
         
     Returns:

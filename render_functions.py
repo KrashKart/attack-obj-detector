@@ -31,26 +31,15 @@ from pytorch3d.renderer.camera_utils import join_cameras_as_batch as join_camera
 import torchshow as ts
 
 from helper import *
-        
-def set_device():
-    """Sets the device to either "cuda:0" if available or "cpu" otherwise
-    Args:
-        None
-        
-    Returns:
-        device: device
-    """
-
-    # check if cuda is available, set device cuda if True and cpu if False
-    if torch.cuda.is_available():
-        device = torch.device("cuda:0")
-        torch.cuda.set_device(device)
-    else:
-        device = torch.device("cpu")
-    return device
     
 
-def create_mesh(filepath, device, normalise=True, position=None, rotation=0.0, rot_axis="Y", size_scale=1):
+def create_mesh(filepath, 
+                device, 
+                normalise=True, 
+                position=None, 
+                rotation=0.0, 
+                rot_axis="Y", 
+                size_scale=1):
     """Loads a mesh from an obj file and any mtl and texture file associated with the object
     
     Args:
@@ -157,7 +146,7 @@ def create_cameras(device, elev_batch=10, azim_batch=10, distance=2.0, elevMin=0
         elevMin, elevMax, azimMin, azimMax (float): Max and Min angles in degrees of azim and elev
     
     Returns:
-        cameras (list): list of cameras (position)
+        cameras (Camera list): list of Cameras
     """
     cameras = []
     elev = torch.linspace(elevMin, elevMax, elev_batch)
@@ -215,7 +204,18 @@ def get_texture_uv(mesh):
     texture_image = mesh.textures.maps_padded().clone().detach()
     return texture_image
 
+
 def see_uv(mesh, **kwargs):
+    """Visualise the TextureUV map of the mesh
+    
+    Args:
+        mesh: mesh
+        **kwargs: kwargs for ts.show
+     
+    Returns:
+        None
+    """
+    
     uv = get_texture_uv(mesh)
     ts.show(uv * 255, **kwargs)
 
@@ -271,13 +271,13 @@ def render_one(mesh, renderer, device, distance=3.0, elev=45, azim=45):
     """Renders one point of view of the object
     
     Args:
-        mesh: a Meshes object
-        renderer: renderer object to be used for rendering
-        device: An engine (cpu or cuda) to pass the rendering to
+        mesh: mesh
+        renderer: renderer
+        device: device
         distance, elev, azim (int): parameters of the camera to render on (elev and azim in degs)
         
     Returns:
-        images (Tensor): Tensor of the rendered image of shape [1, RGBA, W, H]
+        Render object rendered by the camera
     """
 
     # Initialise cameras 
@@ -288,15 +288,16 @@ def render_one(mesh, renderer, device, distance=3.0, elev=45, azim=45):
 
                            
 def render_batch(scene, renderer, cameras):
-    """Batch rendering
+    """Batch rendering using cameras
     
     Args:
         renderer (renderer) : renderer
         scene (Meshes): Meshes object (unextended)
-        cameras (cameras): cameras (not list of cameras)
+        cameras (Camera list): list of Cameras
     
     Returns:
-        images (Tensor): tensor of shape [batch_size, RGBA, W, H]
+        images (Renders list): list of Renders by the cameras
+        
     """
     
     renders = []
@@ -308,7 +309,7 @@ def render_batch(scene, renderer, cameras):
 
 
 def render_batch_paste(scene, renderer, cameras):
-    """FOR PASTE ONLY. Batch rendering
+    """FOR PASTE ONLY. Renders scene using cameras, then finds the respective image to paste the car onto
     
     Args:
         renderer (renderer) : renderer
@@ -316,7 +317,7 @@ def render_batch_paste(scene, renderer, cameras):
         cameras (cameras): cameras (not list of cameras)
     
     Returns:
-        images (Tensor): tensor of shape [batch_size, RGBA, W, H]
+        output (Render list): list of Renders
     """
     
     output = []
@@ -379,4 +380,3 @@ def join(*args):
         print("No meshes selected")
     scene = join_scene(list(args))
     return scene
-

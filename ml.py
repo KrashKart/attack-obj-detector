@@ -15,12 +15,13 @@ import torchshow as ts
 from helper import *
 
 
-def load_model(name, device):
+def load_model(name, device, conf, iou, max_det):
     """Loads YOLOv5 from hub and sets to eval
     
     Args:
         name (str): name of the model ("yolov5s", "yolov5m", etc)
         device: device
+        conf, iou, max_det (float): params for YOLOv5
     
     Returns:
         model: model with pretrained weights
@@ -64,9 +65,9 @@ def batch_predict(model, images, adverse=False, adverse_classes=2):
         adverse_classes (int): class indices to mark as adverse
     
     Returns:
-        predicts (dict): either a dictionary of predicted classes (YOLOv5l with Autoshape) 
-                    or a [batch_size, N, 85] Tensor (DetectMultiBackend)
-        adverse (dict): list of indices where the predictions are of adverse_class (if adverse is True)
+        predicts (Render list): Resultant predictions on the list of Renders
+        predict_count (dict): Dict containing predicted_classes : qty 
+        adverse (Render list): list of adverse image Renders
     """
     
     predicts = []
@@ -107,14 +108,11 @@ def show_adverse(adverses, **kwargs):
     """FOR PASTE ONLY. Renders and shows the adverse viewpoints and dist, elev, azim
     
     Args:
-        mesh (Meshes): mesh
-        renderer: renderer
-        adverses (dict): dict of cam_idx: pred_class
-        test_idxs (int list): list of indices of test camera views w.r.t. master camera list
-        cameras (Cam list): list of (camera, d, e, a)s (master camera list)
+        adverses (Render list): list of adverse Renders
+        ** kwargs: kwargs for ts.show
     
     Returns:
-        adverse_views (tup list): list of tuples containing (
+        None
     """
     
     if not adverses:
