@@ -1,4 +1,10 @@
 import torch
+import logging
+from PIL import Image
+from torchvision import transforms
+import torchshow as ts
+import numpy as np
+import matplotlib.pyplot as plt
 
 class Camera:
     def __init__(self, camera, dist, elev, azim):
@@ -29,11 +35,12 @@ class Camera:
 
     
 class Render:
-    def __init__(self, image, dist, elev, azim):
+    def __init__(self, image, dist, elev, azim, pred=None):
         self.image = image
         self.dist = dist
         self.elev = elev
         self.azim = azim
+        self.pred = None
     
     def get_image(self):
         return self.image
@@ -49,6 +56,17 @@ class Render:
     
     def get_params(self):
         return float(self.dist), float(self.elev), float(self.azim)
+    
+    def get_pred(self):
+        return self.pred
+
+
+class blockOutput:
+    def __enter__(self):
+        logging.disable(logging.INFO)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        logging.disable(logging.NOTSET)
 
     
 def preprocess(image, purpose):
@@ -114,8 +132,8 @@ def img_mask(img, onto, device):
         result (Tensor): resultant image
     """
     
-    img = img.get_image()
-    d, e, a = img.get_params()
+    if isinstance(img, Render):
+        img = img.get_image()
     
     if type(onto) != torch.Tensor:
         print("onto must be of type Tensor")
@@ -133,7 +151,6 @@ def img_mask(img, onto, device):
     mask = torch.all(img == 1, dim=0)
     result = torch.where(mask, onto, img)
     result = torch.unsqueeze(result, 0)
-    result_render = Render(result, d, e, a)
     
     return result
 
@@ -150,12 +167,20 @@ def save(image, path="./results", **kwargs):
         None
     """
     
-    if isinstance(image, Render):
-        saveimage = image.get_image()
+    if type(image) == list:
+        output = []
+        for render in image:
+            output.append(preprocess(render.get_image(), "pil"))
+        output = torch.stack(output)
+        ts.save(output, **kwargs)
     else:
-        saveimage = image                  
-    saveimage = preprocess(saveimage, "pil")                   
-    ts.save(saveimage, path, **kwargs)
+        if isinstance(image, Render):
+            seeimage = image.get_image()
+        else:
+            seeimage = image
+        saveimage = torch.clamp(seeimage, min=0, max=1)
+        saveimage = preprocess(seeimage, "pil") 
+        ts.save(seeimage, **kwargs)
 
 
 def see(image, **kwargs):
@@ -169,12 +194,20 @@ def see(image, **kwargs):
         None
     """   
     
-    if isinstance(image, Render):
-        seeimage = image.get_image()
+    if type(image) == list:
+        output = []
+        for render in image:
+            output.append(preprocess(render.get_image(), "pil"))
+        output = torch.stack(output)
+        ts.show(output, **kwargs)
     else:
-        seeimage = image                  
-    seeimage = preprocess(seeimage, "pil") 
-    ts.show(seeimage, **kwargs)
+        if isinstance(image, Render):
+            seeimage = image.get_image()
+        else:
+            seeimage = image
+        seeimage = torch.clamp(seeimage, min=0, max=1)
+        seeimage = preprocess(seeimage, "pil") 
+        ts.show(seeimage, **kwargs)
 
     
 def plot_progress(returns, preds, iters_no, labels, path="./images/progress.jpg"):

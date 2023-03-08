@@ -7,12 +7,12 @@ import logging
 from torchvision import transforms
 from PIL import Image
 from tqdm import tqdm
-from render_functions import *
+# from render_functions import *
 import numpy as np
 from pytorch3d.renderer.camera_utils import join_cameras_as_batch as join_cameras
 import torchshow as ts
 
-from helper import Camera, Render, preprocess
+from helper import *
 
 
 def load_model(name, device):
@@ -54,7 +54,7 @@ def predict(model, image, show=False):
     return pred
 
 
-def batch_predict(model, images, adverse=True, adverse_classes=2):
+def batch_predict(model, images, adverse=False, adverse_classes=2):
     """Conducts batch prediction on batch tensor
     
     Args:
@@ -80,18 +80,27 @@ def batch_predict(model, images, adverse=True, adverse_classes=2):
             
             if len(pred.xyxy[0]) == 0:
                 pred_class = "No Detection"
+                pred_class_idx = -1
             else:
                 pred_class_idx = int(pred.xyxy[0][0][5])
                 pred_class = classes[pred_class_idx]
             
             predict_count[pred_class] = predict_count.get(pred_class, 0) + 1
             
+            with blockOutput():
+                pred.save(exist_ok=True)
+            img = Image.open("./runs/detect/exp/image0.jpg")
+            pred_img = transforms.PILToTensor()(img)
+            
             d, e, a = render.get_params()
-            predicts.append((Render(render.get_image(), d, e, a) , pred_class))
+            predicts.append(Render(pred_img, d, e, a, pred_class))
             if adverse and adverse_classes == pred_class_idx:
-                adverses.append((Render(render.get_image(), d, e, a) , pred_class))
-        
-    return predicts, predict_count, adverses if adverse and adverse_classes else predicts, predict_count
+                adverses.append(Render(pred_img, d, e, a, pred_class))
+    
+    if adverse and adverse_classes:
+        return predicts, predict_count, adverses
+    else:
+        return predicts, predict_count
 
 
 def show_adverse(adverses, **kwargs):
@@ -112,7 +121,7 @@ def show_adverse(adverses, **kwargs):
         print("No adverse views")
     else:
         for adverse in adverses:  # adverse = (Render object, pred)
-            d, e, a = adverse[0].get_params()
-            image = adverse[0].get_image()
-            pred = adverse[1]
-            ts.show(image, suptitle=f"{pred}: Dist {d}, Elev {e}, Azim {a}", **kwargs)
+            d, e, a = adverse.get_params()
+            image = adverse.get_image()
+            pred = adverse.get_pred()
+            ts.show(image[..., :3], suptitle=f"{pred}: Dist {d}, Elev {e}, Azim {a}", **kwargs)

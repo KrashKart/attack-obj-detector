@@ -30,8 +30,7 @@ from pytorch3d.structures.meshes import join_meshes_as_scene as join_scene
 from pytorch3d.renderer.camera_utils import join_cameras_as_batch as join_cameras
 import torchshow as ts
 
-import ml
-from helper import Camera, Render, preprocess
+from helper import *
         
 def set_device():
     """Sets the device to either "cuda:0" if available or "cpu" otherwise
@@ -216,6 +215,10 @@ def get_texture_uv(mesh):
     texture_image = mesh.textures.maps_padded().clone().detach()
     return texture_image
 
+def see_uv(mesh, **kwargs):
+    uv = get_texture_uv(mesh)
+    ts.show(uv * 255, **kwargs)
+
 
 def image_grid(
     images,
@@ -300,7 +303,7 @@ def render_batch(scene, renderer, cameras):
     for camera in cameras:
         d, e, a = camera.get_params()
         image = camera.render(scene, renderer)
-        renders.append(Render(image, d, e, a))
+        renders.append(image)
     return renders
 
 
@@ -319,8 +322,8 @@ def render_batch_paste(scene, renderer, cameras):
     output = []
     for camera in cameras:
         d, e, a = camera.get_params()
-        onto = ml.search(d, e, a, torch.device("cuda:0"))
-        img = camera.render(scene, renderer).get_image()
+        onto = search(d, e, a, torch.device("cuda:0"))
+        img = camera.render(scene, renderer)
         img = preprocess(img, "pil")
         onto = preprocess(onto, "pil")
         result = img_mask(img, onto, torch.device("cuda:0"))
