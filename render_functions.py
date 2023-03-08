@@ -31,87 +31,7 @@ from pytorch3d.renderer.camera_utils import join_cameras_as_batch as join_camera
 import torchshow as ts
 
 import ml
-
-
-class Camera:
-    def __init__(self, camera, dist, elev, azim):
-        self.camera = camera
-        self.dist = dist
-        self.elev = elev
-        self.azim = azim
-    
-    def get_camera(self):
-        return self.camera
-    
-    def get_dist(self):
-        return float(self.dist)
-    
-    def get_elev(self):
-        return float(self.elev)
-    
-    def get_azim(self):
-        return float(self.azim)
-    
-    def get_params(self):
-        return float(self.dist), float(self.elev), float(self.azim)
-    
-    def render(self, mesh, renderer):
-        images = renderer(mesh, cameras=self.get_camera()) # [1, W, H, RGBA]
-        images = Render(torch.clamp(images, min=0.0, max=1.0), self.get_dist(), self.get_elev(), self.get_azim())
-        return images
-
-    
-class Render:
-    def __init__(self, image, dist, elev, azim):
-        self.image = image
-        self.dist = dist
-        self.elev = elev
-        self.azim = azim
-    
-    def get_image(self):
-        return self.image
-    
-    def get_dist(self):
-        return float(self.dist)
-    
-    def get_elev(self):
-        return float(self.elev)
-    
-    def get_azim(self):
-        return float(self.azim)
-    
-    def get_params(self):
-        return float(self.dist), float(self.elev), float(self.azim)
-
-    
-def preprocess(image, purpose):
-    """Carries out processing for image to make it compatible with functions
-    
-    Args:
-        image (Tensor): Tensor rendered by renderer [1, RGB(A), W, H] or [1, W, H, RGB(A)]
-        purpose (str): whether to process for "pred" [1, RGB, W, H], "view" [W, H, RGB] or "pil" [RGB, W, H]
-    
-    Returns:
-        processed (Tensor): processed tensor
-    """
-    if isinstance(image, Render):
-        image = image.get_image()
-    if len(image.shape) == 3:
-        image = torch.unsqueeze(image, 0)
-    if image.shape[3] == 3 or image.shape[3] == 4: # [1, W, H, RGB(A)] -> [1, RGB(A), W, H]
-        image = image.permute(0, 3, 1, 2)
-    if image.shape[1] == 4: # [1, RGB(A), W, H] -> [1, RGB, W, H]
-        image = image[:, :3, :, :]
-    
-    if purpose == "pred": # if pred, required shape is [1, RGB, W, H]
-        return image
-    elif purpose == "view": # if view, required shape is [W, H, RGB]
-        return image.squeeze().permute(1, 2, 0)
-    elif purpose == "pil":
-        return image.squeeze()
-    else:
-        print("purpose must be 'pred', 'view' or 'pil'")
-
+from helper import Camera, Render, preprocess
         
 def set_device():
     """Sets the device to either "cuda:0" if available or "cpu" otherwise
@@ -229,9 +149,6 @@ def create_render(device,
     
     return renderer
 
-
-
-
 def create_cameras(device, elev_batch=10, azim_batch=10, distance=2.0, elevMin=0, elevMax=30, azimMin=0, azimMax=30):
     """Creates a list of cameras
     Args:
@@ -264,29 +181,6 @@ def create_cameras(device, elev_batch=10, azim_batch=10, distance=2.0, elevMin=0
 
 
 def tt_split(cameras, train_prop):
-    """Splits cameras according to train proportion
-    
-    Args:
-        cameras (list): list of cameras
-        train_prop (float): proportion of cameras to dedicate to training
-        
-    Returns:
-        train_cams, test_cams (cameras): FoVPerspective cameras for testing
-        training_idx, test_idx (int list): index of train and test cameras w.r.t. original cameras list
-    """
-    
-    total_views = len(cameras)
-    train_size = round(train_prop * total_views)
-    training_idx = np.random.choice(total_views, train_size, replace=False)
-    test_idx = [idx for idx in range(total_views) if idx not in training_idx]
-
-    print(test_idx)
-    train_cams = join_cameras([cameras[int(idx)].get_camera() for idx in training_idx])
-    test_cams = join_cameras([cameras[int(idx)].get_camera() for idx in test_idx])
-    return train_cams, test_cams, training_idx, test_idx
-
-
-def tt_split_paste(cameras, train_prop):
     """Splits cameras according to train proportion
     
     Args:
@@ -368,7 +262,8 @@ def image_grid(
             ax.imshow(im[..., 3])
         if not show_axes:
             ax.set_axis_off()
-    
+
+            
 def render_one(mesh, renderer, device, distance=3.0, elev=45, azim=45):
     """Renders one point of view of the object
     
@@ -401,14 +296,16 @@ def render_batch(scene, renderer, cameras):
         images (Tensor): tensor of shape [batch_size, RGBA, W, H]
     """
     
-    temp_mesh = scene.extend(len(cameras))
-    images = renderer(temp_mesh, cameras=cameras)
-    images = torch.clamp(images, min=0.0, max=1.0)
-    return images
+    renders = []
+    for camera in cameras:
+        d, e, a = camera.get_params()
+        image = camera.render(scene, renderer)
+        renders.append(Render(image, d, e, a))
+    return renders
 
 
 def render_batch_paste(scene, renderer, cameras):
-    """Batch rendering
+    """FOR PASTE ONLY. Batch rendering
     
     Args:
         renderer (renderer) : renderer
@@ -427,11 +324,11 @@ def render_batch_paste(scene, renderer, cameras):
         img = preprocess(img, "pil")
         onto = preprocess(onto, "pil")
         result = img_mask(img, onto, torch.device("cuda:0"))
-        output += result
+        output.append(Render(result, d, e, a))
     return output
 
                            
-def render_n(mesh, renderer, device, batch_size, distance=2.0, elevMin=0, elevMax=180, azimMin=0, azimMax=360):
+def render_around(mesh, renderer, device, batch_size, distance=2.0, elevMin=0, elevMax=180, azimMin=0, azimMax=360, **kwargs):
     """Used to render and visualise BATCH_SIZE number of views of the object
     
     Args:
@@ -461,92 +358,8 @@ def render_n(mesh, renderer, device, batch_size, distance=2.0, elevMin=0, elevMa
 
     images = renderer(meshes, cameras=cameras, lights=lights) # [batch_size, W, H, RGBA]
     images = torch.clamp(images, min=0.0, max=1.0)
-    return images
-
-
-def render_around(mesh, renderer, device, batch_size=15, distance=2.0, elevMin=0, elevMax=90, azimMin=0, azimMax=360, **kwargs):
-    """Used to render and visualise BATCH_SIZE number of views of the object
-    
-    Args:
-    
-        mesh: mesh
-        renderer: renderer
-        device: device
-        batch_size (int): the number of camera angles and subplots to render
-        distance (float): distance from the cameras to [0, 0, 0]
-        elevMin, elevMax, azimMin, azimMax (int): Max and Min values of the elev and azim of the cameras
-        path (str): path to save the image to
-        **kwargs: for ts.show
-        
-    Returns:
-        None
-    """
-    
-    # render without grad to prevent interference with computation graph
-
-    images = render_n(mesh, renderer, device, batch_size, distance, elevMin, elevMax, azimMin, azimMax)
     ts.show(preprocess(images, "pil"), **kwargs)
-
-
-def save(image, path="./results", **kwargs):
-    """Saves rendered image to a defined path
-    
-    Args:
-        image (Tensor): Tensor of shape [1, RGB, W, H]
-        path (str): String containing destination and image name
-        **kwargs (bruh): other args for ts.save
-        
-    Returns:
-        None
-    """
-    
-    if isinstance(image, Render):
-        saveimage = image.get_image()
-    else:
-        saveimage = image                  
-    saveimage = preprocess(saveimage, "pil")                   
-    ts.save(saveimage, path, **kwargs)
-
-
-def see(image, **kwargs):
-    """Visualises the mesh
-    
-    Args:
-        image (Tensor): Tensor containing information about a mesh
-        **kwargs (lmaooooo): other args for ts.show
-        
-    Returns:
-        None
-    """   
-    
-    if isinstance(image, Render):
-        seeimage = image.get_image()
-    else:
-        seeimage = image                  
-    seeimage = preprocess(seeimage, "pil") 
-    ts.show(seeimage, **kwargs)
-    
-
-def see_uv(mesh, save=False, **kwargs):
-    """Visualises the mesh texture UV map
-    
-    Args:
-        mesh: mesh
-        save (bool): save UV as jpg file
-        **kwargs: other args for ts.show and ts.save
-        
-    Returns:
-        None
-    """  
-    
-    plt.figure(figsize=(7,7))
-    with torch.no_grad():
-        texture_uv = torch.clamp(get_texture_uv(mesh), min=0.0, max=1.0)
-   
-    ts.show(texture_uv, **kwargs)
-    
-    if save:
-        ts.save(texture_uv, **kwargs)
+    return images
 
         
 def join(*args):
@@ -564,35 +377,3 @@ def join(*args):
     scene = join_scene(list(args))
     return scene
 
-def img_mask(img, onto, device):
-    """Takes the img and pastes the car portion onto an image
-    
-    Args:
-        img (Tensor): image tensor of the rendered car [W, H, 3] or [3, W, H]
-        onto (Tensor): image tensor to paste onto [W, H, 3] or [3, W, H]
-        device: device [1, i want starbucks]
-        
-    Returns:
-        result (Tensor): resultant image
-    """
-    
-    if isinstance(img, Render):
-        img = img.get_image()
-    if type(onto) != torch.Tensor:
-        print("onto must be of type Tensor")
-        return
-    elif type(img) != torch.Tensor:
-        print("img must be of type Tensor")
-        return
-    elif torch.max(onto) > 1:
-        onto  = onto / 255
-    
-    img = preprocess(img, "pil")
-    onto = preprocess(onto, "pil")
-    
-    white = torch.ones(3, device=device)
-    mask = torch.all(img == 1, dim=0)
-    result = torch.where(mask, onto, img)
-    result = torch.unsqueeze(result, 0)
-    
-    return result
