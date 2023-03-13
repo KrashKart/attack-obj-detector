@@ -49,7 +49,10 @@ class Render:
         self.pred = pred
     
     def get_image(self):
-        return self.image
+        return self.image[..., :3] # [1, H, W, 3]
+    
+    def get_sil(self):
+        return self.image[..., 3].squeeze() # [H, W]
     
     def get_dist(self):
         return float(self.dist)
@@ -127,6 +130,9 @@ def preprocess(image, purpose):
         image = image.get_image()
     if len(image.shape) == 3:
         image = torch.unsqueeze(image, 0)
+    elif len(image.shape) == 2:
+        image = torch.unsqueeze(image, 2)
+        image = torch.unsqueeze(image, 0)
     if image.shape[3] == 3 or image.shape[3] == 4: # [1, W, H, RGB(A)] -> [1, RGB(A), W, H]
         image = image.permute(0, 3, 1, 2)
     if image.shape[1] == 4: # [1, RGB(A), W, H] -> [1, RGB, W, H]
@@ -135,7 +141,7 @@ def preprocess(image, purpose):
     if purpose == "pred": # if pred, required shape is [1, RGB, W, H]
         return image
     elif purpose == "pil":
-        return image.squeeze()
+        return image.squeeze(0)
     else:
         print("purpose must be 'pred', 'view' or 'pil'")
         

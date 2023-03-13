@@ -137,18 +137,35 @@ def create_render(device,
     
     return renderer
 
-def create_cameras(device, elev_batch=10, azim_batch=10, distance=2.0, elevMin=0, elevMax=30, azimMin=0, azimMax=30):
+def create_cameras(device, 
+                   elev_batch=10, 
+                   azim_batch=10, 
+                   distance=2.0, 
+                   elevMin=0, 
+                   elevMax=30, 
+                   azimMin=0, 
+                   azimMax=30, 
+                   elevlst=None,
+                   azimlst=None):
     """Creates a list of cameras
     Args:
         device: device
         elev_batch, azim_batch (int): number of cameras to create for elev and azim each
         distance (float): Distance from (0, 0, 0) to place the cameras for rendering
         elevMin, elevMax, azimMin, azimMax (float): Max and Min angles in degrees of azim and elev
+        elevlst, azimlst (float list): list of custom defined elevs and azims
     
     Returns:
         cameras (Camera list): list of Cameras
     """
     cameras = []
+    if elevlst and azimlst:
+        elev = torch.tensor(elevlst)
+        azim = torch.tensor(azimlst)
+    elif elevlst or azimlst:
+        print("Either elevlst and azimlst must both be defined or not defined at all")
+        return
+
     elev = torch.linspace(elevMin, elevMax, elev_batch)
     azim = torch.linspace(azimMin, azimMax, azim_batch)
     

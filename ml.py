@@ -57,7 +57,46 @@ def predict(model, image, show=False):
     return pred
 
 
-def batch_predict(model, images, adverse=False, adverse_classes=2):
+def iou(boxA, boxB):
+    # determine the (x, y)-coordinates of the intersection rectangle
+    xA = max(boxA[0], boxB[0])
+    yA = max(boxA[1], boxB[1])
+    xB = min(boxA[2], boxB[2])
+    yB = min(boxA[3], boxB[3])
+    # compute the area of intersection rectangle
+    interArea = max(0, xB - xA + 1) * max(0, yB - yA + 1)
+    # compute the area of both the prediction and ground-truth
+    # rectangles
+    boxAArea = (boxA[2] - boxA[0] + 1) * (boxA[3] - boxA[1] + 1)
+    boxBArea = (boxB[2] - boxB[0] + 1) * (boxB[3] - boxB[1] + 1)
+    # compute the intersection over union by taking the intersection
+    # area and dividing it by the sum of prediction + ground-truth
+    # areas - the interesection area
+    iou = interArea / float(boxAArea + boxBArea - interArea)
+    # return the intersection over union value
+    return iou
+
+def find_bbox(img_tensor):
+    nonzero_indices = torch.nonzero(img_tensor)
+    
+    # find the minimum and maximum x and y coordinates of the non-zero elements
+    x_min = nonzero_indices[:, 1].min().item()
+    y_min = nonzero_indices[:, 0].min().item()
+    x_max = nonzero_indices[:, 1].max().item()
+    y_max = nonzero_indices[:, 0].max().item()
+    return x_min, x_max, y_min, y_max
+
+def draw_bbox(img_tensor, coords):
+    xmin, xmax, ymin, ymax = coords
+    copy = preprocess(img_tensor.clone().detach(), "pil")
+    copy[..., ymin, xmin:xmax+1, :] = 1.0 - copy[..., ymin, xmin:xmax+1, :]
+    copy[..., ymax, xmin:xmax+1, :] = 1.0 - copy[..., ymax, xmin:xmax+1, :]
+    copy[..., ymin:ymax+1, xmin, :] = 1.0 - copy[..., ymin:ymax+1, xmin, :]
+    copy[..., ymin:ymax+1, xmax, :] = 1.0 - copy[..., ymin:ymax+1, xmax, :]
+    return copy
+
+
+def batch_predict(model, images, adverse=False, adverse_classes=2, ):
     """Conducts batch prediction on batch tensor
     
     Args:
