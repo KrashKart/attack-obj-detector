@@ -58,6 +58,17 @@ def predict(model, image, show=False):
 
 
 def iou(boxA, boxB):
+    """Returns iou score of boxA over boxB
+    
+    Args:
+        boxA (tuple): tuple of xmin, ymin, xmax, ymax
+        boxB (tuple): tuple of xmin, ymin, xmax, ymax
+    
+    Returns:
+        iou (float): iou score
+    
+    """
+    
     # determine the (x, y)-coordinates of the intersection rectangle
     xA = max(boxA[0], boxB[0])
     yA = max(boxA[1], boxB[1])
@@ -76,17 +87,35 @@ def iou(boxA, boxB):
     # return the intersection over union value
     return iou
 
-def find_bbox(img_tensor):
-    nonzero_indices = torch.nonzero(img_tensor)
+def find_bbox(silhouette):
+    """Finds bbox coordinates
+    
+    Args:
+        silhouette (Tensor): tensor of the silhouette [W, H]
+    
+    Returns:
+        x_min, y_min, x_max, y_max (int tuple): bbox coords tuple
+    """
+    
+    nonzero_indices = torch.nonzero(silhouette)
     
     # find the minimum and maximum x and y coordinates of the non-zero elements
     x_min = nonzero_indices[:, 1].min().item()
     y_min = nonzero_indices[:, 0].min().item()
     x_max = nonzero_indices[:, 1].max().item()
     y_max = nonzero_indices[:, 0].max().item()
-    return x_min, x_max, y_min, y_max
+    return (x_min, y_min, x_max, y_max)
 
 def draw_bbox(img_tensor, coords):
+    """Draws bbox on image using coords
+    
+    Args:
+        img_tensor (Tensor): image tensor
+        coord (tuple): bbox coords tuple
+    
+    Returns:
+        copy (Tensor): copy of img_tensor with bbox drawn
+    """
     xmin, xmax, ymin, ymax = coords
     copy = preprocess(img_tensor.clone().detach(), "pil")
     copy[..., ymin, xmin:xmax+1, :] = 1.0 - copy[..., ymin, xmin:xmax+1, :]
@@ -96,36 +125,46 @@ def draw_bbox(img_tensor, coords):
     return copy
 
 
-def batch_predict(model, images, adverse=False, adverse_classes=2, ):
+def batch_predict(model, images, coords, adverse=False, adverse_classes=2, iou_thres=0.25):
     """Conducts batch prediction on batch tensor
     
     Args:
         model: model
         images (Render list): batch_size list of Renders
+        coords (tuple list): list of bbox coord tuples per render
         adverse (bool): whether to mark adverse imag
         adverse_classes (int): class indices to mark as adverse
+        iou_thresh (float): threshold of iou for prediction against bbox coords
     
     Returns:
         predicts (Render list): Resultant predictions on the list of Renders
         predict_count (dict): Dict containing predicted_classes : qty 
         adverse (Render list): list of adverse image Renders
     """
-    
+
     predicts = []
     predict_count = {}
     adverses = []
     with open("./coco_classes.txt", "r") as f:
         classes = [s.strip() for s in f.readlines()]
     with torch.no_grad():
-        for render in images:
+        for idx, render in enumerate(images):
             pred = predict(model, render.get_image())
-            
-            if len(pred.xyxy[0]) == 0:
-                pred_class = "No Detection"
-                pred_class_idx = -1
-            else:
-                pred_class_idx = int(pred.xyxy[0][0][5])
-                pred_class = classes[pred_class_idx]
+            while True:
+                if len(pred.xyxy[0]) == 0:
+                    pred_class = "No Detection"
+                    pred_class_idx = -1
+                    break
+                else:
+                    pred_box = tuple(pred.xyxy[0][0][:4])
+                    pred_iou = iou(pred_box, coords[idx])
+                    if pred_iou >= iou_thres:
+                        pred_class_idx = int(pred.xyxy[0][0][5])
+                        pred.xyxy[0] = torch.unsqueeze(pred.xyxy[0][0], 0)
+                        break
+                    else:
+                        pred.xyxy[0] = pred.xyxy[0][1:]
+            pred_class = classes[pred_class_idx]
             
             predict_count[pred_class] = predict_count.get(pred_class, 0) + 1
             

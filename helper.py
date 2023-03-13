@@ -48,11 +48,21 @@ class Render:
         self.azim = azim
         self.pred = pred
     
-    def get_image(self):
-        return self.image[..., :3] # [1, H, W, 3]
+    def get_image(self):  # returns img tensor [1, W, H, 3]
+        if len(self.image.shape) == 3:
+            return self.image
+        elif self.image.shape[-1] == 4:
+            return self.image.clone()[..., :3]
+        return self.image.clone().permute(0, 2, 3, 1)[..., :3]
     
     def get_sil(self):
-        return self.image[..., 3].squeeze() # [H, W]
+        if self.image.shape[-1] == 3:
+            print("3D image has no silhouette")
+            return None
+        elif self.image.shape[-1] == 4:  # returns img tensor [W, H]
+            return self.image.clone()[..., 3].squeeze(0)
+        print(self.image.shape)
+        return self.image.clone().permute(0, 2, 3, 1)[..., 3].squeeze(0)
     
     def get_dist(self):
         return float(self.dist)
@@ -146,7 +156,7 @@ def preprocess(image, purpose):
         print("purpose must be 'pred', 'view' or 'pil'")
         
 
-def search(dist, elev, azim, device, path="./data/", start="m1_v26_p0", end="rgb.png"):
+def search(dist, elev, azim, device, path="./data/", start="m1_v1_p20", end="rgb.png"):
     """FOR PASTE ONLY. Finds the picture file with the correct dist, elev and azim and returns its Tensor representation
     
     Args:
@@ -159,7 +169,7 @@ def search(dist, elev, azim, device, path="./data/", start="m1_v26_p0", end="rgb
     """
     
     dist, elev, azim = int(dist), int(elev), int(azim)
-    respective = path + start + f"_Dis_{dist}_Azi_{azim}_Ele_{elev}_" + end
+    respective = path + start + "/" + start + f"_Dis_{dist}_Azi_{azim}_Ele_{elev}_" + end
     onto = Image.open(respective)
     onto = onto.resize((640, 640))
     tran = transforms.PILToTensor()
@@ -169,35 +179,33 @@ def search(dist, elev, azim, device, path="./data/", start="m1_v26_p0", end="rgb
     return onto
 
         
-def img_mask(img, onto, device):
+def img_mask(image, onto, device):
     """Takes the img and pastes the car portion onto an image
     
     Args:
-        img (Tensor): image tensor of the rendered car [W, H, 3] or [3, W, H]
-        onto (Tensor): image tensor to paste onto [W, H, 3] or [3, W, H]
+        image (Tensor): image tensor or Render image
+        onto (Tensor): image tensor
         device: device [1, i want starbucks]
         
     Returns:
         result (Tensor): resultant image
     """
     
-    if isinstance(img, Render):
-        img = img.get_image()
+    if isinstance(image, Render):
+        img = image.get_image()
+        silhouette = image.get_sil().unsqueeze(2)
     
     if type(onto) != torch.Tensor:
         print("onto must be of type Tensor")
         return
-    elif type(img) != torch.Tensor:
-        print("img must be of type Tensor")
-        return
     elif torch.max(onto) > 1:
         onto  = onto / 255
     
-    silhouette = img[..., 3]
     img = preprocess(img, "pil")
     onto = preprocess(onto, "pil")
+    silhouette = preprocess(silhouette, "pil")
     
-    mask = torch.all(silhouette == 0.0, dim=0)
+    mask = torch.all(silhouette == 0.0, dim=2)
     result = torch.where(mask, onto, img)
     result = torch.unsqueeze(result, 0)
     

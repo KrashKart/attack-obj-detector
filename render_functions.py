@@ -25,12 +25,12 @@ from pytorch3d.renderer import (
     SoftSilhouetteShader,
     BlendParams,)
 
-import torchvision.transforms.functional as TF
 from pytorch3d.structures.meshes import join_meshes_as_scene as join_scene
 from pytorch3d.renderer.camera_utils import join_cameras_as_batch as join_cameras
 import torchshow as ts
 
 from helper import *
+from ml import find_bbox
     
 
 def create_mesh(filepath, 
@@ -314,18 +314,21 @@ def render_batch(scene, renderer, cameras):
     
     Returns:
         images (Renders list): list of Renders by the cameras
+        coords (tuple list): list bbox coords per render
         
     """
     
     renders = []
+    coords = []
     for camera in cameras:
         d, e, a = camera.get_params()
         image = camera.render(scene, renderer)
         renders.append(image)
-    return renders
+        coords.append(find_bbox(image.get_sil()))
+    return renders, coords
 
 
-def render_batch_paste(scene, renderer, cameras,):
+def render_batch_paste(scene, renderer, cameras):
     """FOR PASTE ONLY. Renders scene using cameras, then finds the respective image to paste the car onto
     
     Args:
@@ -335,16 +338,21 @@ def render_batch_paste(scene, renderer, cameras,):
     
     Returns:
         output (Render list): list of Renders
+        coords (tuple list): list of bbox coords per image
     """
     
     output = []
+    coords = []
     for camera in cameras:
         d, e, a = camera.get_params()
         onto = search(d, e, a, torch.device("cuda:0"))
         img = camera.render(scene, renderer)
+        sil = img.get_sil()
         result = img_mask(img, onto, torch.device("cuda:0"))
-        output.append(Render(result, d, e, a))
-    return output
+        render = Render(result, d, e, a)
+        output.append(render)
+        coords.append(find_bbox(sil))
+    return output, coords
 
                            
 def render_around(mesh, renderer, device, batch_size, distance=2.0, elevMin=0, elevMax=180, azimMin=0, azimMax=360, **kwargs):
