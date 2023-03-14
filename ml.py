@@ -161,10 +161,10 @@ def batch_predict(model, images, coords, adverse=False, adverse_classes=2, iou_t
                     if pred_iou >= iou_thres:
                         pred_class_idx = int(pred.xyxy[0][0][5])
                         pred.xyxy[0] = torch.unsqueeze(pred.xyxy[0][0], 0)
+                        pred_class = classes[pred_class_idx]
                         break
                     else:
                         pred.xyxy[0] = pred.xyxy[0][1:]
-            pred_class = classes[pred_class_idx]
             
             predict_count[pred_class] = predict_count.get(pred_class, 0) + 1
             

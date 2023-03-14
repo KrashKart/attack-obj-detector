@@ -7,6 +7,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from platform import python_version
 import pytorch3d
+from multiprocessing import Pool
+import time
 
 class Camera:
     """Camera class to store dist, elev and azim for easier handling
@@ -41,29 +43,23 @@ class Camera:
 class Render:
     """Render class to store camera params and prediction
     """
-    def __init__(self, image, dist, elev, azim, pred=None):
-        self.image = image
+    def __init__(self, tensor, dist, elev, azim, pred=None):
+        tensor = preprocess(tensor, "render_save")
+        self.tensor = tensor # [1, W, H, 4] or [1, W, H, 3]
         self.dist = dist
         self.elev = elev
         self.azim = azim
         self.pred = pred
     
+    def get_tensor(self): # [1, W, H, 4]
+        return self.tensor
+    
     def get_image(self):  # returns img tensor [1, W, H, 3]
-        if len(self.image.shape) == 3:
-            return self.image
-        elif self.image.shape[-1] == 4:
-            return self.image.clone()[..., :3]
-        return self.image.clone().permute(0, 2, 3, 1)[..., :3]
+        return self.tensor.clone()[..., :3]
     
-    def get_sil(self):
-        if self.image.shape[-1] == 3:
-            print("3D image has no silhouette")
-            return None
-        elif self.image.shape[-1] == 4:  # returns img tensor [W, H]
-            return self.image.clone()[..., 3].squeeze(0)
-        print(self.image.shape)
-        return self.image.clone().permute(0, 2, 3, 1)[..., 3].squeeze(0)
-    
+    def get_sil(self): # [W, H] (can be expanded to [W, H, 1] after external processing)
+        return self.tensor.clone()[..., 3].squeeze(0)
+
     def get_dist(self):
         return float(self.dist)
     
@@ -138,46 +134,58 @@ def preprocess(image, purpose):
     """
     if isinstance(image, Render):
         image = image.get_image()
+    if len(image.shape) == 2:
+        image = torch.unsqueeze(image, 2)
     if len(image.shape) == 3:
         image = torch.unsqueeze(image, 0)
-    elif len(image.shape) == 2:
-        image = torch.unsqueeze(image, 2)
-        image = torch.unsqueeze(image, 0)
-    if image.shape[3] == 3 or image.shape[3] == 4: # [1, W, H, RGB(A)] -> [1, RGB(A), W, H]
+    if image.shape[3] in [3, 4]:
         image = image.permute(0, 3, 1, 2)
-    if image.shape[1] == 4: # [1, RGB(A), W, H] -> [1, RGB, W, H]
-        image = image[:, :3, :, :]
     
-    if purpose == "pred": # if pred, required shape is [1, RGB, W, H]
-        return image
-    elif purpose == "pil":
-        return image.squeeze(0)
+    if purpose == "pred" or purpose == "pil":
+        if image.shape[1] == 4: # [1, RGB(A), W, H] -> [1, RGB, W, H]
+            image = image[:, :3, :, :]
+        return image if purpose == "pred" else image.squeeze(0)
+    elif purpose == "render_save":
+        return image.permute(0, 2, 3, 1)
     else:
         print("purpose must be 'pred', 'view' or 'pil'")
+
         
-
-def search(dist, elev, azim, device, path="./data/", start="m1_v1_p20", end="rgb.png"):
-    """FOR PASTE ONLY. Finds the picture file with the correct dist, elev and azim and returns its Tensor representation
+def load_data(**kwargs):
+    start = time.time_ns()
+    selected = sorted(os.listdir("./data"))
+    output = []
     
-    Args:
-        dist, elev, azim (float): params
-        device: device
-        path, start, end (str): folder to check + formatting
+    if "elev" in kwargs:
+        kwargs["Ele"] = kwargs["elev"]
+        del kwargs["elev"]
+    if "azim" in kwargs:
+        kwargs["Azi"] = kwargs["azim"]
+        del kwargs["azim"]
+    if "dist" in kwargs:
+        kwargs["Dis"] = kwargs["dist"]
+        del kwargs["dist"]
     
-    Returns:
-        onto (Tensor): picture for pasting [3, W, H]
-    """
-    
-    dist, elev, azim = int(dist), int(elev), int(azim)
-    respective = path + start + "/" + start + f"_Dis_{dist}_Azi_{azim}_Ele_{elev}_" + end
-    onto = Image.open(respective)
-    onto = onto.resize((640, 640))
-    tran = transforms.PILToTensor()
-    onto = tran(onto).to(device)
-    onto = preprocess(onto, "pil")
-
-    return onto
-
+    for param in ["p", "Dis", "Ele", "Azi"]:
+        if param in kwargs:
+            if param != "p":
+                selected = [file for file in selected if param + "_" + str(kwargs[param]) in file]
+            else:
+                selected = [file for file in selected if param + str(kwargs[param]) in file]
+ 
+    for filename in selected:
+        temp = Image.open("./data/" + filename)
+        pipe = tran.ToTensor()
+        image = pipe(temp)
+        filestuff = filename.split("_")
+        d, e, a = filestuff[4], filestuff[6], filestuff[8]
+        render = Render(image, d, e, a)
+        output.append(render)
+    output.sort(key=lambda x: x.get_params())
+    time_taken = time.time_ns() - start
+    print(f"Time taken for data load: {time_taken}")
+    print(f"{len(output)} images loaded")
+    return output
         
 def img_mask(image, onto, device):
     """Takes the img and pastes the car portion onto an image
@@ -194,6 +202,9 @@ def img_mask(image, onto, device):
     if isinstance(image, Render):
         img = image.get_image()
         silhouette = image.get_sil().unsqueeze(2)
+    
+    if isinstance(onto, Render):
+        onto = onto.get_image()
     
     if type(onto) != torch.Tensor:
         print("onto must be of type Tensor")

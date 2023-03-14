@@ -328,7 +328,7 @@ def render_batch(scene, renderer, cameras):
     return renders, coords
 
 
-def render_batch_paste(scene, renderer, cameras):
+def render_batch_paste(scene, renderer, cameras, ontos=None, **params):
     """FOR PASTE ONLY. Renders scene using cameras, then finds the respective image to paste the car onto
     
     Args:
@@ -343,16 +343,18 @@ def render_batch_paste(scene, renderer, cameras):
     
     output = []
     coords = []
+    if not ontos: 
+        ontos = load_data(**params)
     for camera in cameras:
         d, e, a = camera.get_params()
-        onto = search(d, e, a, torch.device("cuda:0"))
+        onto = [ontO for ontO in ontos where ontO.get_params() == camera.get_params()][0]
         img = camera.render(scene, renderer)
         sil = img.get_sil()
         result = img_mask(img, onto, torch.device("cuda:0"))
         render = Render(result, d, e, a)
         output.append(render)
         coords.append(find_bbox(sil))
-    return output, coords
+    return output, coords, ontos
 
                            
 def render_around(mesh, renderer, device, batch_size, distance=2.0, elevMin=0, elevMax=180, azimMin=0, azimMax=360, **kwargs):
