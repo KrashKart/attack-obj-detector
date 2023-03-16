@@ -31,7 +31,6 @@ import torchshow as ts
 
 from helper import *
 from ml import find_bbox
-    
 
 def create_mesh(filepath, 
                 device, 
@@ -118,7 +117,7 @@ def create_render(device,
     
     # set rasterization settings
     raster_settings = RasterizationSettings(
-            image_size=640,
+            image_size=384,
             blur_radius=0.0, 
             faces_per_pixel=1,
             max_faces_per_bin=faces,  # toggle max_faces_per_bin if model has too many faces
@@ -137,14 +136,17 @@ def create_render(device,
     
     return renderer
 
-def create_cameras(device, 
+def create_cameras(device,
+                   dist_batch=1,
                    elev_batch=10, 
                    azim_batch=10, 
-                   distance=2.0, 
+                   distMin=2.0,
+                   distMax=2.0,
                    elevMin=0, 
                    elevMax=30, 
                    azimMin=0, 
-                   azimMax=30, 
+                   azimMax=30,
+                   distlst=None,
                    elevlst=None,
                    azimlst=None):
     """Creates a list of cameras
@@ -159,29 +161,42 @@ def create_cameras(device,
         cameras (Camera list): list of Cameras
     """
     cameras = []
-    if elevlst and azimlst:
+    if distlst and elevlst and azimlst:
+        dist = torch.tensor(distlst)
         elev = torch.tensor(elevlst)
         azim = torch.tensor(azimlst)
-    elif elevlst or azimlst:
-        print("Either elevlst and azimlst must both be defined or not defined at all")
+        for d, e, a in zip(dist, elev, azim):
+            R, T = look_at_view_transform(dist=d, elev=e, azim=360-a)
+            camera = Camera(FoVPerspectiveCameras(device=device, R=R, T=T), d, e, a)
+            cameras.append(camera)
+
+    elif distlst or elevlst or azimlst:
+        print("Either distlst, elevlst and azimlst are all defined or not defined at all")
         return
 
-    elev = torch.linspace(elevMin, elevMax, elev_batch)
-    azim = torch.linspace(azimMin, azimMax, azim_batch)
-    
-    for e in elev:
-        for a in azim:
-            R, T = look_at_view_transform(dist=distance, elev=e, azim=360-a)
-            camera = Camera(FoVPerspectiveCameras(device=device, R=R, T=T), distance, e, a)
-            cameras.append(camera)
-            
-    elevInt = 0 if elev_batch == 1 else (elevMax - elevMin)/(elev_batch - 1)
-    azimInt = 0 if azim_batch == 1 else (azimMax - azimMin)/(azim_batch - 1)
+    else:
+        dist = torch.linspace(distMin, distMax, dist_batch)
+        elev = torch.linspace(elevMin, elevMax, elev_batch)
+        azim = torch.linspace(azimMin, azimMax, azim_batch)
+        
+        for d in dist:
+            for e in elev:
+                for a in azim:
+                    R, T = look_at_view_transform(dist=d, elev=e, azim=360-a)
+                    camera = Camera(FoVPerspectiveCameras(device=device, R=R, T=T), d, e, a)
+                    cameras.append(camera)
+        
+        distInt = 0 if dist_batch == 1 else (distMax - distMin)/(dist_batch - 1)
+        elevInt = 0 if elev_batch == 1 else (elevMax - elevMin)/(elev_batch - 1)
+        azimInt = 0 if azim_batch == 1 else (azimMax - azimMin)/(azim_batch - 1)
+
     print(f"{' Cameras created ':=^35}")
     print(f"{len(cameras)} cameras created")
-    print(f"distance = {distance}")
-    print(f"elev = {elevMin} to {elevMax} in {elevInt:.4f} degree increments")
-    print(f"elev = {azimMin} to {azimMax} in {azimInt:.4f} degree increments")
+    
+    if not distlst and not elevlst and not azimlst:
+        print(f"dist = {distMin} to {distMax} in {distInt:.4f} unit increments")
+        print(f"elev = {elevMin} to {elevMax} in {elevInt:.4f} degree increments")
+        print(f"elev = {azimMin} to {azimMax} in {azimInt:.4f} degree increments")
     return cameras
 
 
@@ -337,7 +352,7 @@ def render_batch_paste(scene, renderer, cameras, ontos=None, **params):
         cameras (cameras): cameras (not list of cameras)
     
     Returns:
-        output (Render list): list of Renders
+        output (Render list): list of filenames to load
         coords (tuple list): list of bbox coords per image
     """
     
@@ -346,15 +361,25 @@ def render_batch_paste(scene, renderer, cameras, ontos=None, **params):
     if not ontos: 
         ontos = load_data(**params)
     for camera in cameras:
+        onto = None
         d, e, a = camera.get_params()
-        onto = [ontO for ontO in ontos where ontO.get_params() == camera.get_params()][0]
+        for maybe in ontos:
+            m = maybe.split("_")
+            mparams = int(m[4]), int(m[8]), int(m[6])
+            if camera.get_params() == mparams:
+                onto = Image.open(maybe).resize((384, 384))
+                ontos.remove(maybe)
+                break
         img = camera.render(scene, renderer)
         sil = img.get_sil()
+        onto = transforms.ToTensor()(onto).to(torch.device("cuda:0"))
+        onto = Render(onto, d, e, a)
+        
         result = img_mask(img, onto, torch.device("cuda:0"))
         render = Render(result, d, e, a)
         output.append(render)
         coords.append(find_bbox(sil))
-    return output, coords, ontos
+    return output, coords
 
                            
 def render_around(mesh, renderer, device, batch_size, distance=2.0, elevMin=0, elevMax=180, azimMin=0, azimMax=360, **kwargs):

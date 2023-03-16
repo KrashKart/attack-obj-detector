@@ -9,12 +9,17 @@ from platform import python_version
 import pytorch3d
 from multiprocessing import Pool
 import time
+import os
+from torch.utils.data import Dataset, DataLoader
+from joblib import Memory
+
+memory = Memory("render_cache")
 
 class Camera:
     """Camera class to store dist, elev and azim for easier handling
     """
     def __init__(self, camera, dist, elev, azim):
-        self.camera = camera
+        self.camera = camera # pytorch3d camera
         self.dist = dist
         self.elev = elev
         self.azim = azim
@@ -57,7 +62,7 @@ class Render:
     def get_image(self):  # returns img tensor [1, W, H, 3]
         return self.tensor.clone()[..., :3]
     
-    def get_sil(self): # [W, H] (can be expanded to [W, H, 1] after external processing)
+    def get_sil(self): # [W, H]
         return self.tensor.clone()[..., 3].squeeze(0)
 
     def get_dist(self):
@@ -72,22 +77,25 @@ class Render:
     def get_params(self):
         return float(self.dist), float(self.elev), float(self.azim)
     
-    def get_pred(self):
+    def get_pred(self): # idt i used this? but maybe u can? dont delete until sure tho
         return self.pred
 
 
 class blockOutput:
     """Used to block logging of INFO level or lower
     """
+    def __init__(self, level=logging.INFO):
+        self.level = level
+    
     def __enter__(self):
-        logging.disable(logging.INFO)
+        logging.disable(self.level)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         logging.disable(logging.NOTSET)
 
         
 def specs():
-    """Prints crucial package version for debug and confirmation
+    """Prints current package version for debug and confirmation
     
     Args:
         None
@@ -127,11 +135,14 @@ def preprocess(image, purpose):
     
     Args:
         image (Tensor): Tensor rendered by renderer [1, RGB(A), W, H] or [1, W, H, RGB(A)]
-        purpose (str): whether to process for "pred" [1, RGB, W, H], "view" [W, H, RGB] or "pil" [RGB, W, H]
+        purpose (str): whether to process for "pred" [1, RGB, W, H], "view" [W, H, RGB], "pil" [RGB, W, H] or "render_save" [1, W, H, RGB(A)]
+        
+        render_save used when initialising Render class, shouldnt be used externally`
     
     Returns:
         image (Tensor): processed tensor
     """
+    
     if isinstance(image, Render):
         image = image.get_image()
     if len(image.shape) == 2:
@@ -151,9 +162,25 @@ def preprocess(image, purpose):
         print("purpose must be 'pred', 'view' or 'pil'")
 
         
+@memory.cache
 def load_data(**kwargs):
+    """Goes through the images in specified/default folder ./data and selects the images for img_mask
+    
+    Args:
+        **kwargs: pass "path", "p", "dist", "azim", "elev" for control over which angles to select
+      
+    Returns:
+        output (Render list): list of (params): Renders 
+    """
+    
     start = time.time_ns()
-    selected = sorted(os.listdir("./data"))
+    
+    if "path" in kwargs:
+        target = kwargs["path"]
+    else:
+        target = "./data"
+    
+    selected = sorted([file for file in os.listdir(target) if (file.endswith(".png") or file.endswith(".jpg"))])
     output = []
     
     if "elev" in kwargs:
@@ -167,26 +194,37 @@ def load_data(**kwargs):
         del kwargs["dist"]
     
     for param in ["p", "Dis", "Ele", "Azi"]:
-        if param in kwargs:
+        if param in kwargs and kwargs[param] != None:
             if param != "p":
                 selected = [file for file in selected if param + "_" + str(kwargs[param]) in file]
             else:
                 selected = [file for file in selected if param + str(kwargs[param]) in file]
- 
-    for filename in selected:
-        temp = Image.open("./data/" + filename)
-        pipe = tran.ToTensor()
-        image = pipe(temp)
+    
+    distlst, elevlst, azimlst = count(selected)
+    selected = list(map(lambda x: target + "/" + x, selected))
+
+    time_taken = (time.time_ns() - start) * 1e-9
+    print(f"Time taken for data load: {time_taken:.3f} seconds")
+    print(f"{len(selected)} images loaded")
+    return selected, distlst, elevlst, azimlst
+
+
+def count(files):
+    dist = []
+    elev = []
+    azim = []
+    for filename in files:
         filestuff = filename.split("_")
-        d, e, a = filestuff[4], filestuff[6], filestuff[8]
-        render = Render(image, d, e, a)
-        output.append(render)
-    output.sort(key=lambda x: x.get_params())
-    time_taken = time.time_ns() - start
-    print(f"Time taken for data load: {time_taken}")
-    print(f"{len(output)} images loaded")
-    return output
-        
+        d, e, a = filestuff[4], filestuff[8], filestuff[6]
+        dist.append(int(d))
+        elev.append(int(e))
+        azim.append(int(a))
+        dist.sort()
+        elev.sort()
+        azim.sort()
+    return dist, elev, azim
+
+
 def img_mask(image, onto, device):
     """Takes the img and pastes the car portion onto an image
     
@@ -221,7 +259,6 @@ def img_mask(image, onto, device):
     result = torch.unsqueeze(result, 0)
     
     return result
-
 
 def save(image, path="./results", **kwargs):
     """Saves rendered image to a defined path

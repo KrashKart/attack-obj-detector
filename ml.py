@@ -87,6 +87,7 @@ def iou(boxA, boxB):
     # return the intersection over union value
     return iou
 
+
 def find_bbox(silhouette):
     """Finds bbox coordinates
     
@@ -105,6 +106,7 @@ def find_bbox(silhouette):
     x_max = nonzero_indices[:, 1].max().item()
     y_max = nonzero_indices[:, 0].max().item()
     return (x_min, y_min, x_max, y_max)
+
 
 def draw_bbox(img_tensor, coords):
     """Draws bbox on image using coords
@@ -168,7 +170,7 @@ def batch_predict(model, images, coords, adverse=False, adverse_classes=2, iou_t
             
             predict_count[pred_class] = predict_count.get(pred_class, 0) + 1
             
-            with blockOutput():
+            with blockOutput(logging.INFO):
                 pred.save(exist_ok=True)
             img = Image.open("./runs/detect/exp/image0.jpg")
             pred_img = transforms.PILToTensor()(img)
