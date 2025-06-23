@@ -1,22 +1,19 @@
 import torch
-import logging
-from PIL import Image
-from torchvision import transforms
 import torchshow as ts
-import numpy as np
-import matplotlib.pyplot as plt
-from platform import python_version
-import pytorch3d
-from multiprocessing import Pool
+
+import logging
 import time
 import os
-from torch.utils.data import Dataset, DataLoader
 from joblib import Memory
+
+import numpy as np
+import matplotlib.pyplot as plt
 
 memory = Memory("render_cache")
 
 class Camera:
-    """Camera class to store dist, elev and azim for easier handling
+    """
+    Camera class to store dist, elev and azim for easier handling
     """
     def __init__(self, camera, dist, elev, azim):
         self.camera = camera # pytorch3d camera
@@ -46,7 +43,8 @@ class Camera:
 
     
 class Render:
-    """Render class to store camera params and prediction
+    """
+    Render class to store camera params and prediction
     """
     def __init__(self, tensor, dist, elev, azim, pred=None):
         tensor = preprocess(tensor, "render_save")
@@ -81,7 +79,7 @@ class Render:
         return self.pred
 
 
-class blockOutput:
+class BlockOutput:
     """Used to block logging of INFO level or lower
     """
     def __init__(self, level=logging.INFO):
@@ -92,42 +90,12 @@ class blockOutput:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         logging.disable(logging.NOTSET)
-
-        
-def specs():
-    """Prints current package version for debug and confirmation
-    
-    Args:
-        None
-       
-    Returns:
-        None
-    """
-    
-    print(f"Python version: {python_version()}")
-    print(f"PyTorch3D version: {pytorch3d.__version__}")
-    print(f"CUDA version: {torch.version.cuda}")
-
     
 def set_device():
-    """Sets the device to either "cuda:0" if available or "cpu" otherwise
-    Args:
-        None
-        
-    Returns:
-        device: device
     """
-
-    # check if cuda is available, set device cuda if True and cpu if False
-    print(f"torch.cuda.is_available() is {torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        print("Cuda available")
-        device = torch.device("cuda:0")
-        torch.cuda.set_device(device)
-    else:
-        print("Cuda not available, using cpu")
-        device = torch.device("cpu")
-    return device
+    Returns the device as either "cuda:0" if available or "cpu" otherwise
+    """
+    return "cuda:0" if torch.cuda.is_available() else "cpu"
 
 
 def preprocess(image, purpose):
@@ -160,7 +128,6 @@ def preprocess(image, purpose):
         return image.permute(0, 2, 3, 1)
     else:
         print("purpose must be 'pred', 'view' or 'pil'")
-
         
 @memory.cache
 def load_data(**kwargs):
@@ -181,7 +148,6 @@ def load_data(**kwargs):
         target = "./data"
     
     selected = sorted([file for file in os.listdir(target) if (file.endswith(".png") or file.endswith(".jpg"))])
-    output = []
     
     if "elev" in kwargs:
         kwargs["Ele"] = kwargs["elev"]
@@ -200,7 +166,7 @@ def load_data(**kwargs):
             else:
                 selected = [file for file in selected if param + str(kwargs[param]) in file]
     
-    distlst, elevlst, azimlst = count(selected)
+    distlst, elevlst, azimlst = _count(selected)
     selected = list(map(lambda x: target + "/" + x, selected))
 
     time_taken = (time.time_ns() - start) * 1e-9
@@ -209,7 +175,7 @@ def load_data(**kwargs):
     return selected, distlst, elevlst, azimlst
 
 
-def count(files):
+def _count(files):
     dist = []
     elev = []
     azim = []
@@ -225,7 +191,7 @@ def count(files):
     return dist, elev, azim
 
 
-def img_mask(image, onto, device):
+def img_mask(image, onto):
     """Takes the img and pastes the car portion onto an image
     
     Args:
@@ -266,7 +232,6 @@ def save(image, path="./results", **kwargs):
     Args:
         image (Tensor) or (Tensor list): Tensor or batch of Tensors in a list
         path (str): String containing destination and image name
-        **kwargs (bruh): other args for ts.save
         
     Returns:
         None
@@ -284,8 +249,8 @@ def save(image, path="./results", **kwargs):
         else:
             seeimage = image
         saveimage = torch.clamp(seeimage, min=0, max=1)
-        saveimage = preprocess(seeimage, "pil") 
-        ts.save(seeimage, **kwargs)
+        saveimage = preprocess(saveimage, "pil") 
+        ts.save(seeimage, path)
 
 
 def see(image, **kwargs):
@@ -315,7 +280,7 @@ def see(image, **kwargs):
         ts.show(seeimage, **kwargs)
 
     
-def plot_progress(returns, preds, iters_no, labels, path="./images/progress.jpg"):
+def plot_progress(returns, preds, iters_no, path="./images/progress.jpg"):
     """Plots and saves periodical images and detections to show progress of the training loop
     
     Args:
@@ -355,7 +320,8 @@ def plot_progress(returns, preds, iters_no, labels, path="./images/progress.jpg"
 
         
 def plot_loss(losses, path="./images/losses.jpg"):
-    """Plots and saves the losses over iterations for visualisation
+    """
+    Plots and saves the losses over iterations for visualisation
     
     Args:
         losses (list): list of losses over all iterations
@@ -376,7 +342,8 @@ def plot_loss(losses, path="./images/losses.jpg"):
     
     
 def plot_classes(classes, path="./images/classes.jpg"):
-    """Plots the progressions of detected classes over the training loop
+    """
+    Plots the progressions of detected classes over the training loop
     
     Args:
         classes (int list): list of detected classes
