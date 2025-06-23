@@ -1,21 +1,16 @@
-import os
-import requests
 import torch
-import torchvision
-import matplotlib.pyplot as plt
-import logging
 from torchvision import transforms
-from PIL import Image
-from tqdm import tqdm
-import numpy as np
 from pytorch3d.renderer.camera_utils import join_cameras_as_batch as join_cameras
 import torchshow as ts
 
+import logging
+from PIL import Image
+
 from helper import *
 
-
 def load_model(name, device, conf=0.25, iou=0.45, max_det=5):
-    """Loads YOLOv5 from hub and sets to eval
+    """
+    Loads YOLOv5 from hub and sets to eval
     
     Args:
         name (str): name of the model ("yolov5s", "yolov5m", etc)
@@ -36,7 +31,8 @@ def load_model(name, device, conf=0.25, iou=0.45, max_det=5):
     return model
 
 def predict(model, image, show=False):
-    """Passes image tensor through the model for prediction
+    """
+    Passes image tensor through the model for prediction
     
     Args:
         model: model (must be compatible with [1, RGB, W, H] input)
@@ -170,7 +166,7 @@ def batch_predict(model, images, coords, adverse=False, adverse_classes=2, iou_t
             
             predict_count[pred_class] = predict_count.get(pred_class, 0) + 1
             
-            with blockOutput(logging.INFO):
+            with BlockOutput(logging.INFO):
                 pred.save(exist_ok=True)
             img = Image.open("./runs/detect/exp/image0.jpg")
             pred_img = transforms.PILToTensor()(img)
@@ -187,7 +183,8 @@ def batch_predict(model, images, coords, adverse=False, adverse_classes=2, iou_t
 
 
 def show_adverse(adverses, **kwargs):
-    """FOR PASTE ONLY. Renders and shows the adverse viewpoints and dist, elev, azim
+    """
+    FOR PASTE ONLY. Renders and shows the adverse viewpoints and dist, elev, azim
     
     Args:
         adverses (Render list): list of adverse Renders
