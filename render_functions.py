@@ -1,33 +1,24 @@
-import os
-import sys
 import torch
-import logging
-import matplotlib.pyplot as plt
-import numpy as np
+import torchshow as ts
 import pytorch3d
 
-
-from PIL import Image
 from pytorch3d.io import load_objs_as_meshes
-from pytorch3d.vis.texture_vis import texturesuv_image_matplotlib
-from pytorch3d.structures import Meshes
 from pytorch3d.renderer import (
-    TexturesVertex,
     look_at_view_transform,
     FoVPerspectiveCameras, 
     PointLights,
-    AmbientLights,
-    DirectionalLights,
     RasterizationSettings,
     MeshRenderer,
     MeshRasterizer,
     SoftPhongShader,
-    SoftSilhouetteShader,
-    BlendParams,)
+    BlendParams)
 
 from pytorch3d.structures.meshes import join_meshes_as_scene as join_scene
-from pytorch3d.renderer.camera_utils import join_cameras_as_batch as join_cameras
-import torchshow as ts
+
+from PIL import Image
+
+import matplotlib.pyplot as plt
+import numpy as np
 
 from helper import *
 from ml import find_bbox
@@ -39,7 +30,8 @@ def create_mesh(filepath,
                 rotation=0.0, 
                 rot_axis="Y", 
                 size_scale=1):
-    """Loads a mesh from an obj file and any mtl and texture file associated with the object
+    """
+    Loads a mesh from an obj file and any mtl and texture file associated with the object
     
     Args:
         filepath (str): path of the .obj file to load
@@ -93,7 +85,8 @@ def create_render(device,
                   light_loc=[2.0, 2.0, 2.0],
                  ):
 
-    """Creates a renderer with one camera
+    """
+    Creates a renderer with one camera
     
     Args:
         device: device
@@ -149,7 +142,9 @@ def create_cameras(device,
                    distlst=None,
                    elevlst=None,
                    azimlst=None):
-    """Creates a list of cameras
+    """
+    Creates a list of cameras
+
     Args:
         device: device
         elev_batch, azim_batch (int): number of cameras to create for elev and azim each
@@ -201,7 +196,8 @@ def create_cameras(device,
 
 
 def tt_split(cameras, train_prop):
-    """Splits cameras according to train proportion
+    """
+    Splits cameras according to train proportion
     
     Args:
         cameras (list): list of cameras
@@ -224,7 +220,8 @@ def tt_split(cameras, train_prop):
 
 
 def get_texture_uv(mesh):
-    """Extracts the TextureUV tensor from the mesh
+    """
+    Extracts the TextureUV tensor from the mesh
     
     Args:
         mesh: mesh
@@ -238,7 +235,8 @@ def get_texture_uv(mesh):
 
 
 def see_uv(mesh, **kwargs):
-    """Visualise the TextureUV map of the mesh
+    """
+    Visualise the TextureUV map of the mesh
     
     Args:
         mesh: mesh
@@ -252,14 +250,12 @@ def see_uv(mesh, **kwargs):
     ts.show(uv, **kwargs)
 
 
-def image_grid(
-    images,
-    rows=None,
-    cols=None,
-    fill: bool = True,
-    show_axes: bool = False,
-    rgb: bool = True,
-):
+def image_grid(images,
+               rows=None,
+               cols=None,
+               fill: bool = True,
+               show_axes: bool = False,
+               rgb: bool = True):
     """
     A util function for plotting a grid of images.
     Not called directly in main.py
@@ -300,7 +296,8 @@ def image_grid(
 
             
 def render_one(mesh, renderer, device, distance=3.0, elev=45, azim=45):
-    """Renders one point of view of the object
+    """
+    Renders one point of view of the object
     
     Args:
         mesh: mesh
@@ -320,7 +317,8 @@ def render_one(mesh, renderer, device, distance=3.0, elev=45, azim=45):
 
                            
 def render_batch(scene, renderer, cameras):
-    """Batch rendering using cameras
+    """
+    Batch rendering using cameras
     
     Args:
         renderer (renderer) : renderer
@@ -336,7 +334,6 @@ def render_batch(scene, renderer, cameras):
     renders = []
     coords = []
     for camera in cameras:
-        d, e, a = camera.get_params()
         image = camera.render(scene, renderer)
         renders.append(image)
         coords.append(find_bbox(image.get_sil()))
