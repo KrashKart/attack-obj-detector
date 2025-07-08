@@ -1,5 +1,5 @@
 # Adversarial Attack on Object Detectors (2023)
-This repo contains code written (from scratch, by me) for my Post-A Level research internship: *Real World Adversarial Attacks and Defence on Deep Neural Networks*.
+This repo contains code written by me for my Post-A Level research internship: *Real World Adversarial Attacks and Defence on Deep Neural Networks*.
 
 ![](structure.png)
 
